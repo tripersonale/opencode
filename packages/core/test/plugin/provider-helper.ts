@@ -65,6 +65,7 @@ export const it = testEffect(
     Layer.provideMerge(
       Layer.mock(Credential.Service)({
         all: () => Effect.succeed([]),
+        list: () => Effect.succeed([]),
       }),
     ),
     Layer.provideMerge(EventV2.defaultLayer),

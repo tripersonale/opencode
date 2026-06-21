@@ -1,6 +1,8 @@
 import { Effect } from "effect"
 import { PluginV2 } from "../../plugin"
 import { ProviderV2 } from "../../provider"
+import { Credential } from "../../credential"
+import { Integration } from "../../integration"
 
 function selectLanguage(sdk: any, modelID: string, useChat: boolean) {
   if (useChat && sdk.chat) return sdk.chat(modelID)
@@ -15,18 +17,25 @@ export const AzurePlugin = PluginV2.define({
   effect: Effect.gen(function* () {
     return {
       "catalog.transform": Effect.fn(function* (evt) {
+        const credentials = yield* Credential.Service
+        const credList = yield* credentials.list(Integration.ID.make("azure"))
+        const cred = credList.at(-1)
+        const accountResourceName = cred?.value.metadata?.resourceName as string | undefined
+
         for (const item of evt.provider.list()) {
           if (item.provider.api.type !== "aisdk") continue
           if (item.provider.api.package !== "@ai-sdk/azure") continue
           const configured = item.provider.request.body.resourceName
           const resourceName =
-            typeof configured === "string" && configured.trim() !== "" ? configured : process.env.AZURE_RESOURCE_NAME
+            typeof configured === "string" && configured.trim() !== ""
+              ? configured
+              : accountResourceName ?? process.env.AZURE_RESOURCE_NAME
           if (!resourceName) continue
-          evt.provider.update(item.provider.id, (provider) => {
+          evt.provider.update(item.provider.id, (provider: any) => {
             provider.request.body.resourceName = resourceName
           })
         }
-      }),
+      }) as any,
       "aisdk.sdk": Effect.fn(function* (evt) {
         if (evt.package !== "@ai-sdk/azure") return
         if (evt.model.providerID === ProviderV2.ID.azure) {

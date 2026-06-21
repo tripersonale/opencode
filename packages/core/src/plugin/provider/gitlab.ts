@@ -3,6 +3,8 @@ import { InstallationVersion } from "../../installation/version"
 import { Effect } from "effect"
 import { PluginV2 } from "../../plugin"
 import { ProviderV2 } from "../../provider"
+import { Credential } from "../../credential"
+import { Integration } from "../../integration"
 
 export const GitLabPlugin = PluginV2.define({
   id: PluginV2.ID.make("gitlab"),
@@ -11,13 +13,24 @@ export const GitLabPlugin = PluginV2.define({
       "aisdk.sdk": Effect.fn(function* (evt) {
         if (evt.package !== "gitlab-ai-provider") return
         const mod = yield* Effect.promise(() => import("gitlab-ai-provider"))
+
+        let apiKey: string | undefined = typeof evt.options.apiKey === "string" ? evt.options.apiKey : undefined
+        if (!apiKey) {
+          const credentials = yield* Credential.Service
+          const credList = yield* credentials.list(Integration.ID.make("gitlab"))
+          const cred = credList.at(-1)
+          if (cred?.value.type === "key") apiKey = cred.value.key
+          else if (cred?.value.type === "oauth") apiKey = cred.value.access
+        }
+        apiKey = apiKey ?? process.env.GITLAB_TOKEN
+
         evt.sdk = mod.createGitLab({
           ...evt.options,
           instanceUrl:
             typeof evt.options.instanceUrl === "string"
               ? evt.options.instanceUrl
               : (process.env.GITLAB_INSTANCE_URL ?? "https://gitlab.com"),
-          apiKey: typeof evt.options.apiKey === "string" ? evt.options.apiKey : process.env.GITLAB_TOKEN,
+          apiKey,
           aiGatewayHeaders: {
             "User-Agent": `opencode/${InstallationVersion} gitlab-ai-provider/${mod.VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
             "anthropic-beta": "context-1m-2025-08-07",
@@ -29,7 +42,7 @@ export const GitLabPlugin = PluginV2.define({
             ...evt.options.featureFlags,
           },
         })
-      }),
+      }) as any,
       "aisdk.language": Effect.fn(function* (evt) {
         if (evt.model.providerID !== ProviderV2.ID.gitlab) return
         const featureFlags =

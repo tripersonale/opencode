@@ -3,6 +3,8 @@ import { InstallationVersion } from "../../installation/version"
 import { Effect } from "effect"
 import { PluginV2 } from "../../plugin"
 import { ProviderV2 } from "../../provider"
+import { Credential } from "../../credential"
+import { Integration } from "../../integration"
 
 const providerID = ProviderV2.ID.make("cloudflare-workers-ai")
 
@@ -13,13 +15,24 @@ export const CloudflareWorkersAIPlugin = PluginV2.define({
       "catalog.transform": Effect.fn(function* (evt) {
         const item = evt.provider.get(providerID)
         if (!item) return
-        evt.provider.update(item.provider.id, (provider) => {
+
+        const credentials = yield* Credential.Service
+        const credList = yield* credentials.list(Integration.ID.make("cloudflare-workers-ai"))
+        const cred = credList.at(-1)
+        const metadataAccountId = cred?.value.metadata?.accountId as string | undefined
+        const credentialApiKey = cred?.value.type === "key" ? cred.value.key : undefined
+
+        evt.provider.update(item.provider.id, (provider: any) => {
           if (provider.api.type !== "aisdk") return
-          if (provider.api.url) return
-          const accountId = resolveAccountId(provider.request.body)
-          if (accountId) provider.api.url = workersEndpoint(accountId)
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID
+            ?? stringOption(provider.request.body, "accountId")
+            ?? metadataAccountId
+          if (accountId) provider.request.body.accountId = accountId
+          if (!provider.api.url && accountId) provider.api.url = workersEndpoint(accountId)
+          if (!stringOption(provider.request.body, "apiKey") && credentialApiKey)
+            provider.request.body.apiKey = credentialApiKey
         })
-      }),
+      }) as any,
       "aisdk.sdk": Effect.fn(function* (evt) {
         if (evt.model.providerID !== providerID) return
         if (evt.package !== "@ai-sdk/openai-compatible") return
