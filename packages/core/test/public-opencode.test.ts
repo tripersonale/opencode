@@ -41,7 +41,7 @@ describe("public native OpenCode API", () => {
     }),
   )
 
-  it.effect("switches to an available model and variant", () =>
+  it.live("switches to an available model and variant", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.promise(() => tmpdir())
       try {
@@ -63,7 +63,7 @@ describe("public native OpenCode API", () => {
     }),
   )
 
-  it.effect("rejects missing and Location-disabled models without changing the Session", () =>
+  it.live("rejects missing and Location-disabled models without changing the Session", () =>
     Effect.gen(function* () {
       const dirs = yield* Effect.promise(() => Promise.all([tmpdir(), tmpdir()]))
       const [available, disabled] = dirs
@@ -100,7 +100,7 @@ describe("public native OpenCode API", () => {
     }),
   )
 
-  it.effect("rejects an unavailable variant without changing the Session", () =>
+  it.live("rejects an unavailable variant without changing the Session", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.promise(() => tmpdir())
       try {
