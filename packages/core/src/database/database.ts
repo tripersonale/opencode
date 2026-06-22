@@ -32,6 +32,7 @@ function compatPostgresDb(pgDb: EffectDrizzlePostgres.EffectPgDatabase & { $clie
     "time_completed",
     "time_created",
     "time_updated",
+    "time_initialized",
     "time_used",
     "tokens_cache_read",
     "tokens_cache_write",
