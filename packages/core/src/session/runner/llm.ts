@@ -209,6 +209,8 @@ export const layer = Layer.effect(
           agent.id,
         ).pipe(retryAgentMismatch(undefined)))
       const current = yield* getSession(sessionID)
+      if (current.location.directory !== session.location.directory || current.location.workspaceID !== session.location.workspaceID)
+        return yield* Effect.interrupt
       if ((yield* agents.select(current.agent)).id !== agent.id || !sameModel(current.model, session.model))
         return yield* Effect.die(rebuildPreparedTurn())
       const model = yield* models.resolve(session)
