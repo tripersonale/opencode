@@ -27,13 +27,24 @@ import { ToolRegistry } from "../src/tool/registry"
 import { ApplicationTools } from "../src/tool/application-tools"
 
 const applicationTools = ApplicationTools.layer
+const credentialMock = Layer.succeed(Credential.Service, Credential.Service.of({
+  all: (): any => Effect.succeed([]),
+  list: (_id: any): any => Effect.succeed([]),
+  get: (_id: any): any => Effect.succeed(undefined),
+  create: (_input: any): any => Effect.die("not implemented"),
+  update: (_id: any, _updates: any): any => Effect.die("not implemented"),
+  remove: (_id: any): any => Effect.die("not implemented"),
+} as Credential.Interface))
+
 const it = testEffect(
   Layer.merge(
-    Layer.mergeAll(applicationTools, Database.defaultLayer, EventV2.defaultLayer),
+    Layer.mergeAll(applicationTools, Database.defaultLayer, EventV2.defaultLayer, credentialMock),
     LocationServiceMap.layer.pipe(
       Layer.provide(applicationTools),
+      Layer.provide(credentialMock),
       Layer.provide(
         Layer.mergeAll(
+          Database.defaultLayer,
           Project.defaultLayer,
           EventV2.defaultLayer,
           Credential.defaultLayer,
