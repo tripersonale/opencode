@@ -213,21 +213,12 @@ export const layerWith = (options?: LayerOptions) =>
                           if (input && row?.ownerID && row.ownerID !== input.ownerID) {
                             return
                           }
-                          const next = latest + 1
-                          let seq: number
-                          if (input?.seq !== undefined) {
-                            seq = input.seq
-                          } else {
-                            const result = yield* db.execute(
-                              sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${aggregateID}, 1) ON CONFLICT (aggregate_id) DO UPDATE SET seq = event_sequence.seq + 1 RETURNING seq`
-                            )
-                            seq = (result.rows[0] as any).seq as number
-                          }
-                          if (input && seq !== next) {
+                          const seq = input?.seq ?? latest + 1
+                          if (input && seq !== latest + 1) {
                             yield* Effect.die(
                               new InvalidDurableEventError({
                                 type: event.type,
-                                message: `Sequence mismatch for aggregate ${aggregateID}: expected ${next}, got ${seq}`,
+                                message: `Sequence mismatch for aggregate ${aggregateID}: expected ${latest + 1}, got ${seq}`,
                               }),
                             )
                           }
@@ -275,6 +266,7 @@ export const layerWith = (options?: LayerOptions) =>
                                 data: encoded,
                               },
                             ])
+                            .onConflictDoNothing()
                             .run()
                             .pipe(Effect.orDie)
                           return { aggregateID, seq }
