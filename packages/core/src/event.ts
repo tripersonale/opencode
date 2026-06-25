@@ -214,9 +214,15 @@ export const layerWith = (options?: LayerOptions) =>
                             return
                           }
                           const next = latest + 1
-                          const seq = input?.seq ?? (yield* db.execute(
-                            sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${aggregateID}, 1) ON CONFLICT (aggregate_id) DO UPDATE SET seq = event_sequence.seq + 1 RETURNING seq`
-                          )).rows[0].seq as number
+                          let seq: number
+                          if (input?.seq !== undefined) {
+                            seq = input.seq
+                          } else {
+                            const result = yield* db.execute(
+                              sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${aggregateID}, 1) ON CONFLICT (aggregate_id) DO UPDATE SET seq = event_sequence.seq + 1 RETURNING seq`
+                            )
+                            seq = (result.rows[0] as any).seq as number
+                          }
                           if (input && seq !== next) {
                             yield* Effect.die(
                               new InvalidDurableEventError({
