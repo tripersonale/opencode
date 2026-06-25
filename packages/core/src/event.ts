@@ -4,6 +4,7 @@ import { Cause, Context, Effect, Layer, Option, PubSub, Schema, Stream } from "e
 import { Event } from "@opencode-ai/schema/event"
 import type { Data, Definition, Payload } from "@opencode-ai/schema/event"
 import { and, asc, eq, gt } from "drizzle-orm"
+import { and, asc, eq, gt, sql } from "drizzle-orm"
 import { Database } from "./database/database"
 import { EventSequenceTable, EventTable } from "./event/sql"
 import { Location } from "./location"
@@ -212,12 +213,15 @@ export const layerWith = (options?: LayerOptions) =>
                           if (input && row?.ownerID && row.ownerID !== input.ownerID) {
                             return
                           }
-                          const seq = input?.seq ?? latest + 1
-                          if (input && seq !== latest + 1) {
+                          const next = latest + 1
+                          const seq = input?.seq ?? (yield* db.execute(
+                            sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${aggregateID}, 1) ON CONFLICT (aggregate_id) DO UPDATE SET seq = event_sequence.seq + 1 RETURNING seq`
+                          )).rows[0].seq as number
+                          if (input && seq !== next) {
                             yield* Effect.die(
                               new InvalidDurableEventError({
                                 type: event.type,
-                                message: `Sequence mismatch for aggregate ${aggregateID}: expected ${latest + 1}, got ${seq}`,
+                                message: `Sequence mismatch for aggregate ${aggregateID}: expected ${next}, got ${seq}`,
                               }),
                             )
                           }
