@@ -213,15 +213,40 @@ export const layerWith = (options?: LayerOptions) =>
                           if (input && row?.ownerID && row.ownerID !== input.ownerID) {
                             return
                           }
-                          const seq = input?.seq ?? latest + 1
-                          if (input && seq !== latest + 1) {
-                            yield* Effect.die(
-                              new InvalidDurableEventError({
-                                type: event.type,
-                                message: `Sequence mismatch for aggregate ${aggregateID}: expected ${latest + 1}, got ${seq}`,
-                              }),
-                            )
-                          }
+                          let seq: number
+                          if (input?.seq !== undefined) {
+                            seq = input.seq
+                            if (seq !== latest + 1) {
+                              yield* Effect.die(
+                                new InvalidDurableEventError({
+                                  type: event.type,
+                                  message: `Sequence mismatch for aggregate ${aggregateID}: expected ${latest + 1}, got ${seq}`,
+                                }),
+                              )
+                            }
+                            yield* db
+                              .insert(EventSequenceTable)
+                              .values([{ aggregate_id: aggregateID, seq, owner_id: input?.ownerID }])
+                              .onConflictDoUpdate({
+                                target: [EventSequenceTable.aggregate_id],
+                                set: {
+                                  seq,
+                                  ...(input?.ownerID && row?.ownerID == null ? { owner_id: input.ownerID } : {}),
+                                },
+                              })
+                              .run()
+                              .pipe(Effect.orDie)
+                          } else {
+                            const [{ seq: nextSeq }] = yield* db
+                              .insert(EventSequenceTable)
+                              .values([{ aggregate_id: aggregateID, seq: 0 }])
+                              .onConflictDoUpdate({
+                                target: [EventSequenceTable.aggregate_id],
+                                set: { seq: sql`${EventSequenceTable.seq} + 1` },
+                              })
+                              .returning()
+                              .pipe(Effect.orDie)
+                            seq = nextSeq                          }
                           const stored = yield* db
                             .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
                             .from(EventTable)
@@ -244,18 +269,6 @@ export const layerWith = (options?: LayerOptions) =>
                           }
                           if (commit) yield* commit(seq)
                           yield* db
-                            .insert(EventSequenceTable)
-                            .values([{ aggregate_id: aggregateID, seq, owner_id: input?.ownerID }])
-                            .onConflictDoUpdate({
-                              target: EventSequenceTable.aggregate_id,
-                              set: {
-                                seq,
-                                ...(input?.ownerID && row?.ownerID == null ? { owner_id: input.ownerID } : {}),
-                              },
-                            })
-                            .run()
-                            .pipe(Effect.orDie)
-                          yield* db
                             .insert(EventTable)
                             .values([
                               {
@@ -266,7 +279,6 @@ export const layerWith = (options?: LayerOptions) =>
                                 data: encoded,
                               },
                             ])
-                            .onConflictDoNothing()
                             .run()
                             .pipe(Effect.orDie)
                           return { aggregateID, seq }
