@@ -62,7 +62,7 @@ describe("DatabaseMigration", () => {
     await run(
       Effect.gen(function* () {
         const db = yield* makeDb
-        yield* DatabaseMigration.apply(db)
+        yield* DatabaseMigration.apply(db, "sqlite")
 
         expect(yield* db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'`)).toEqual({
           name: "session",
@@ -103,7 +103,7 @@ describe("DatabaseMigration", () => {
         Effect.gen(function* () {
           const db = yield* makeDb
           yield* db.run(sql`CREATE TABLE unrelated (id text PRIMARY KEY)`)
-          yield* DatabaseMigration.apply(db)
+          yield* DatabaseMigration.apply(db, "sqlite")
         }),
       ),
     ).rejects.toThrow("Database is not empty and has no session table")
@@ -120,7 +120,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_context_epoch (session_id, baseline, snapshot, baseline_seq) VALUES ('ses_existing', 'baseline', '{}', 0)`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [contextEpochAgentMigration])
+        yield* DatabaseMigration.applyOnly(db, [contextEpochAgentMigration], "sqlite")
 
         expect(yield* db.get(sql`SELECT agent FROM session_context_epoch WHERE session_id = 'ses_existing'`)).toEqual({
           agent: "build",
@@ -139,7 +139,7 @@ describe("DatabaseMigration", () => {
         yield* db.run(
           sql`CREATE UNIQUE INDEX credential_connector_active_idx ON credential (connector_id) WHERE active = 1`,
         )
-        yield* DatabaseMigration.applyOnly(db, [simplifyIntegrationCredentialsMigration])
+        yield* DatabaseMigration.applyOnly(db, [simplifyIntegrationCredentialsMigration], "sqlite")
 
         yield* db.run(
           sql`INSERT INTO credential (id, connector_id, method_id, label, value, active, time_created, time_updated) VALUES ('legacy', 'openai', 'oauth', 'Legacy', '{}', 1, 1, 1)`,
@@ -193,7 +193,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_input (id, session_id, prompt, delivery, time_created) VALUES ('msg_pending', 'session', '{}', 'steer', 1)`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [eventSourcedSessionInputMigration])
+        yield* DatabaseMigration.applyOnly(db, [eventSourcedSessionInputMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id, workspace_id FROM session`)).toEqual([
           { id: "session", workspace_id: null },
@@ -350,7 +350,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_message (id, session_id, type, time_created, time_updated, data) VALUES ('stale_projection', 'session', 'user', 1, 1, '{}')`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMessageProjectionOrderMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMessageProjectionOrderMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id, session_id, data FROM message`)).toEqual([
           { id: "legacy_message", session_id: "session", data: '{"role":"user"}' },
@@ -384,7 +384,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO message (id, session_id, data) VALUES ('message_1', 'session_1', '{"role":"assistant","cost":1.25,"tokens":{"input":2,"output":3,"reasoning":4,"cache":{"read":5,"write":6}}}')`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [sessionUsageMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionUsageMigration], "sqlite")
 
         expect(
           yield* db.get(
@@ -430,7 +430,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session (id, directory, path) VALUES (${"posix"}, ${"/home/me/we\\ird"}, ${"src\\weird"})`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [normalizeStoragePathsMigration])
+        yield* DatabaseMigration.applyOnly(db, [normalizeStoragePathsMigration], "sqlite")
 
         expect(yield* db.get(sql`SELECT worktree, sandboxes FROM project WHERE id = 'win'`)).toEqual({
           worktree: "C:/Repo/Thing",
@@ -458,7 +458,7 @@ describe("DatabaseMigration", () => {
     await run(
       Effect.gen(function* () {
         const db = yield* makeDb
-        yield* DatabaseMigration.apply(db)
+        yield* DatabaseMigration.apply(db, "sqlite")
         const projectID = ProjectV2.ID.make("codec_project")
         const worktree = AbsolutePath.make("C:\\Repo\\Thing")
         const sandbox = AbsolutePath.make("C:\\Repo\\Thing\\sandbox")
@@ -575,7 +575,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260127222353_familiar_lady_ursula', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [])
+        yield* DatabaseMigration.applyOnly(db, [], "sqlite")
 
         expect(yield* db.get(sql`SELECT id FROM migration`)).toEqual({ id: "20260127222353_familiar_lady_ursula" })
       }),
@@ -595,7 +595,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260511173437_session-metadata', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration`)).toEqual([{ id: "20260511173437_session-metadata" }])
       }),
@@ -610,7 +610,7 @@ describe("DatabaseMigration", () => {
         yield* db.run(sql`CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)`)
         yield* db.run(sql`INSERT INTO migration (id, time_completed) VALUES ('20260530232709_lovely_romulus', 1)`)
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration ORDER BY id`)).toEqual([
           { id: "20260511173437_session-metadata" },
@@ -634,7 +634,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260127222353_familiar_lady_ursula', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [])
+        yield* DatabaseMigration.applyOnly(db, [], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration ORDER BY id`)).toEqual([{ id: "existing" }])
       }),

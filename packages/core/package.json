@@ -18,6 +18,61 @@
   "exports": {
     "./session/runner": "./src/session/runner/index.ts",
     "./system-context": "./src/system-context/index.ts",
+    "./account/sql": {
+      "sqlite": "./src/account/sql.ts",
+      "postgres": "./src/account/sql.pg.ts",
+      "default": "./src/account/sql.ts"
+    },
+    "./control-plane/workspace.sql": {
+      "sqlite": "./src/control-plane/workspace.sql.ts",
+      "postgres": "./src/control-plane/workspace.sql.pg.ts",
+      "default": "./src/control-plane/workspace.sql.ts"
+    },
+    "./credential/sql": {
+      "sqlite": "./src/credential/sql.ts",
+      "postgres": "./src/credential/sql.pg.ts",
+      "default": "./src/credential/sql.ts"
+    },
+    "./data-migration": {
+      "sqlite": "./src/data-migration.sql.ts",
+      "postgres": "./src/data-migration.sql.pg.ts",
+      "default": "./src/data-migration.sql.ts"
+    },
+    "./database/path": {
+      "sqlite": "./src/database/path.ts",
+      "postgres": "./src/database/path.pg.ts",
+      "default": "./src/database/path.ts"
+    },
+    "./database/schema.sql": {
+      "sqlite": "./src/database/schema.sql.ts",
+      "postgres": "./src/database/schema.sql.pg.ts",
+      "default": "./src/database/schema.sql.ts"
+    },
+    "./event/sql": {
+      "sqlite": "./src/event/sql.ts",
+      "postgres": "./src/event/sql.pg.ts",
+      "default": "./src/event/sql.ts"
+    },
+    "./permission/sql": {
+      "sqlite": "./src/permission/sql.ts",
+      "postgres": "./src/permission/sql.pg.ts",
+      "default": "./src/permission/sql.ts"
+    },
+    "./project/sql": {
+      "sqlite": "./src/project/sql.ts",
+      "postgres": "./src/project/sql.pg.ts",
+      "default": "./src/project/sql.ts"
+    },
+    "./session/sql": {
+      "sqlite": "./src/session/sql.ts",
+      "postgres": "./src/session/sql.pg.ts",
+      "default": "./src/session/sql.ts"
+    },
+    "./share/sql": {
+      "sqlite": "./src/share/sql.ts",
+      "postgres": "./src/share/sql.pg.ts",
+      "default": "./src/share/sql.ts"
+    },
     "./*": "./src/*.ts"
   },
   "imports": {
@@ -82,6 +137,7 @@
     "@aws-sdk/credential-providers": "3.1057.0",
     "@effect/opentelemetry": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@effect/sql-pg": "4.0.0-beta.74",
     "@effect/sql-sqlite-bun": "catalog:",
     "@lydell/node-pty": "catalog:",
     "@ff-labs/fff-bun": "0.9.4",
@@ -92,6 +148,8 @@
     "@opencode-ai/llm": "workspace:*",
     "@opencode-ai/schema": "workspace:*",
     "@opencode-ai/plugin": "workspace:*",
+    "@types/pg": "8.20.0",
+    "pg": "8.21.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/context-async-hooks": "2.6.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.214.0",
