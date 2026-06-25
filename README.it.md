@@ -7,7 +7,10 @@
     </picture>
   </a>
 </p>
-<p align="center">L’agente di coding AI open source.</p>
+<p align="center">L’agente di coding AI open source.
+
+> **Fork** di [anomalyco/opencode](https://github.com/anomalyco/opencode) con supporto multi-database PostgreSQL.  
+> Modifiche sul branch [`feat/multi-database-backend`](https://github.com/tripersonale/opencode/tree/feat/multi-database-backend).</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
