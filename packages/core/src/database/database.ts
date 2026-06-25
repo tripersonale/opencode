@@ -78,8 +78,53 @@ const baseLayer = Layer.effect(
 
 export const layer = baseLayer as unknown as Layer.Layer<Service>
 
+// SQLite-specific layer that ignores OPENCODE_DATABASE_DIALECT and always
+// builds a SQLite database. Used by layerFromPath and tests that force SQLite.
+function sqliteDatabaseLayer(filename: string): Layer.Layer<Service> {
+  return Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const envConfig = yield* DatabaseConfig.loadEffect
+      const db = yield* makeSqliteDatabase
+
+      yield* db.run("PRAGMA journal_mode = WAL")
+      yield* db.run("PRAGMA synchronous = NORMAL")
+      yield* db.run("PRAGMA busy_timeout = 5000")
+      yield* db.run("PRAGMA cache_size = -64000")
+      yield* db.run("PRAGMA foreign_keys = ON")
+      yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
+
+      yield* DatabaseMigration.apply(db, "sqlite")
+
+      return { db, config: { ...envConfig, dialect: "sqlite" as const, sqliteFilename: filename } }
+    }).pipe(
+      Effect.provide(sqliteLayer({ filename })),
+      Effect.orDie,
+    ),
+  )
+}
+
+// PostgreSQL-specific layer that ignores OPENCODE_DATABASE_DIALECT.
+function postgresDatabaseLayer(url: string): Layer.Layer<Service> {
+  return Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const envConfig = yield* DatabaseConfig.loadEffect
+      const pgDb = yield* makePostgresDatabase
+      const db = compatPostgresDb(pgDb)
+
+      yield* DatabaseMigration.apply(db, "postgres")
+
+      return { db, config: { ...envConfig, dialect: "postgres" as const, postgresUrl: url } }
+    }).pipe(
+      Effect.provide(Layer.mergeAll(Global.defaultLayer, PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie))),
+      Effect.orDie,
+    ),
+  )
+}
+
 export function layerFromPath(filename: string) {
-  return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+  return sqliteDatabaseLayer(filename)
 }
 
 export function path() {
@@ -106,4 +151,23 @@ const databaseDefaultLayer = (() => {
 
 export const defaultLayer = databaseDefaultLayer
 
-export const node = LayerNode.make(defaultLayer, [])
+// Dynamic node layer used by LayerNode-based composition. It reads the dialect
+// at layer-build time so that tests can switch between SQLite and PostgreSQL
+// via environment variables without reloading the module graph.
+export const node = LayerNode.make(
+  Layer.unwrap(
+    Effect.map(DatabaseConfig.loadEffect, (config) => {
+      if (config.dialect === "postgres") {
+        if (!config.postgresUrl) {
+          return Layer.effect(
+            Service,
+            Effect.fail("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL"),
+          )
+        }
+        return postgresDatabaseLayer(config.postgresUrl)
+      }
+      return sqliteDatabaseLayer(config.sqliteFilename)
+    }),
+  ),
+  [],
+)
