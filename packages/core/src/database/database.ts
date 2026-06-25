@@ -152,18 +152,20 @@ const databaseDefaultLayer = (() => {
 export const defaultLayer = databaseDefaultLayer
 
 // Dynamic node layer used by LayerNode-based composition. It reads the dialect
-// at layer-build time so that tests can switch between SQLite and PostgreSQL
-// via environment variables without reloading the module graph.
+// at layer-build time so that production can switch to PostgreSQL via env vars.
+// Tests that need to force SQLite must use `Database.layerFromPath` directly
+// and explicitly provide their own Database.node replacement; this node follows
+// the configured dialect.
 export const node = LayerNode.make(
   Layer.unwrap(
     Effect.map(DatabaseConfig.loadEffect, (config) => {
       if (config.dialect === "postgres") {
-        if (!config.postgresUrl) {
-          return Layer.effect(
-            Service,
-            Effect.fail("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL"),
-          )
-        }
+      if (!config.postgresUrl) {
+        return Layer.effect(
+          Service,
+          Effect.fail("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL"),
+        ) as Layer.Layer<Service>
+      }
         return postgresDatabaseLayer(config.postgresUrl)
       }
       return sqliteDatabaseLayer(config.sqliteFilename)
@@ -171,3 +173,9 @@ export const node = LayerNode.make(
   ),
   [],
 )
+
+// Test helper: a Database.node replacement that always uses SQLite, regardless
+// of OPENCODE_DATABASE_DIALECT. Use this in tests that want to force SQLite.
+export function nodeFromPath(filename: string) {
+  return LayerNode.make(sqliteDatabaseLayer(filename), [])
+}
