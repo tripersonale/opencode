@@ -20,14 +20,94 @@ type DatabaseShape = Effect.Success<typeof makeSqliteDatabase>
 // calling db.run/all/get while we stabilize the adapter. This is a temporary
 // compatibility shim until we split SQLite and PostgreSQL services.
 function compatPostgresDb(pgDb: EffectDrizzlePostgres.EffectPgDatabase & { $client: unknown }): DatabaseShape {
-  if (typeof (pgDb as any).run === "function") {
-    return pgDb as unknown as DatabaseShape
+  const numericPgFields = new Set([
+    "active",
+    "admitted_seq",
+    "baseline_seq",
+    "count",
+    "position",
+    "revision",
+    "seq",
+    "time_archived",
+    "time_completed",
+    "time_created",
+    "time_updated",
+    "time_used",
+    "tokens_cache_read",
+    "tokens_cache_write",
+    "tokens_input",
+    "tokens_output",
+    "tokens_reasoning",
+  ])
+  function normalizePgRow(row: unknown): unknown {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return row
+    const next: Record<string, unknown> = { ...(row as Record<string, unknown>) }
+    for (const [key, value] of Object.entries(next)) {
+      if (numericPgFields.has(key) && typeof value === "string" && /^-?\d+$/.test(value)) {
+        next[key] = Number(value)
+      }
+    }
+    return next
   }
-  return Object.assign(pgDb, {
-    run: (query: unknown) => pgDb.execute(query as never).pipe(Effect.asVoid),
-    all: (query: unknown) => pgDb.execute(query as never),
-    get: (query: unknown) => pgDb.execute(query as never).pipe(Effect.map((rows: ReadonlyArray<unknown>) => rows[0])),
-  }) as unknown as DatabaseShape
+  function normalizePgRows(rows: unknown): unknown {
+    if (!Array.isArray(rows)) return rows
+    return rows.map(normalizePgRow)
+  }
+
+  function patchEffectQuery(qb: any): any {
+    if (!qb || typeof qb !== "object") return qb
+    if (!("get" in qb)) {
+      qb.get = () => qb.pipe(Effect.map((rows: ReadonlyArray<unknown>) => normalizePgRow(rows[0])))
+    }
+    if (!("all" in qb)) {
+      qb.all = () => qb.pipe(Effect.map(normalizePgRows))
+    }
+    if (!("run" in qb)) {
+      qb.run = () => qb.pipe(Effect.asVoid)
+    }
+    for (const method of [
+      "from",
+      "where",
+      "values",
+      "set",
+      "returning",
+      "onConflictDoUpdate",
+      "onConflictDoNothing",
+      "innerJoin",
+      "leftJoin",
+      "rightJoin",
+      "orderBy",
+      "limit",
+      "offset",
+      "groupBy",
+      "having",
+    ]) {
+      const orig = qb[method]
+      if (typeof orig === "function" && !orig.__opencodePgCompatPatched) {
+        const wrapped = function (this: any, ...args: any[]) {
+          return patchEffectQuery(orig.apply(this, args))
+        }
+        ;(wrapped as any).__opencodePgCompatPatched = true
+        qb[method] = wrapped
+      }
+    }
+    return qb
+  }
+
+  const origSelect = (pgDb as any).select.bind(pgDb)
+  ;(pgDb as any).select = (...args: any[]) => patchEffectQuery(origSelect(...args))
+  for (const method of ["insert", "update", "delete"] as const) {
+    const orig = (pgDb as any)[method]?.bind(pgDb)
+    if (orig) (pgDb as any)[method] = (...args: any[]) => patchEffectQuery(orig(...args))
+  }
+
+  const origExecute = (pgDb as any).execute.bind(pgDb)
+  ;(pgDb as any).run = (query: unknown) => origExecute(query as never).pipe(Effect.asVoid)
+  ;(pgDb as any).all = (query: unknown) => origExecute(query as never).pipe(Effect.map(normalizePgRows))
+  ;(pgDb as any).get = (query: unknown) =>
+    origExecute(query as never).pipe(Effect.map((rows: ReadonlyArray<unknown>) => normalizePgRow(rows[0])))
+
+  return pgDb as unknown as DatabaseShape
 }
 
 export interface Interface {
