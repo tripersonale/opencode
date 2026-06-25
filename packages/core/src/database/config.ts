@@ -1,6 +1,8 @@
 export * as DatabaseConfig from "./config"
 
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Global from "../global"
 import * as InstallationChannel from "../installation/version"
 import { isAbsolute, join } from "path"
@@ -13,6 +15,17 @@ export interface Config {
   readonly postgresUrl?: string
   readonly mysqlUrl?: string
 }
+
+// Context tag used to inject a database configuration into the layer graph.
+// This allows callers such as `sqliteDatabaseLayer` to force a specific dialect
+// and filename without mutating process.env.
+export const ConfigService = Context.Service<Config>(
+  "@opencode/v2/storage/DatabaseConfig",
+)
+
+// Default configuration layer: reads the environment once when the layer is
+// built and provides the resulting Config.
+export const defaultLayer = Layer.succeed(ConfigService, load())
 
 export function sqliteDefaultPath() {
   const flag = process.env.OPENCODE_DB
@@ -58,4 +71,6 @@ export function load(): Config {
   return { dialect, sqliteFilename: sqliteDefaultPath() }
 }
 
-export const loadEffect = Effect.sync(load)
+export const loadEffect = Effect.gen(function* () {
+  return yield* ConfigService
+}).pipe(Effect.orDie)

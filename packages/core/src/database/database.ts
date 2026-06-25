@@ -76,51 +76,35 @@ const baseLayer = Layer.effect(
   }).pipe(Effect.orDie),
 )
 
-export const layer = baseLayer as unknown as Layer.Layer<Service>
+export const layer = baseLayer.pipe(
+  Layer.provide(DatabaseConfig.defaultLayer),
+) as unknown as Layer.Layer<Service>
 
 // SQLite-specific layer that ignores OPENCODE_DATABASE_DIALECT and always
 // builds a SQLite database. Used by layerFromPath and tests that force SQLite.
 function sqliteDatabaseLayer(filename: string): Layer.Layer<Service> {
-  return Layer.effect(
-    Service,
-    Effect.gen(function* () {
-      const envConfig = yield* DatabaseConfig.loadEffect
-      const db = yield* makeSqliteDatabase
-
-      yield* db.run("PRAGMA journal_mode = WAL")
-      yield* db.run("PRAGMA synchronous = NORMAL")
-      yield* db.run("PRAGMA busy_timeout = 5000")
-      yield* db.run("PRAGMA cache_size = -64000")
-      yield* db.run("PRAGMA foreign_keys = ON")
-      yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
-
-      yield* DatabaseMigration.apply(db, "sqlite")
-
-      return { db, config: { ...envConfig, dialect: "sqlite" as const, sqliteFilename: filename } }
-    }).pipe(
-      Effect.provide(sqliteLayer({ filename })),
-      Effect.orDie,
-    ),
-  )
+  const config: DatabaseConfig.Config = {
+    dialect: "sqlite",
+    sqliteFilename: filename,
+  }
+  return baseLayer.pipe(
+    Layer.provide(sqliteLayer({ filename })),
+    Layer.provide(Layer.succeed(DatabaseConfig.ConfigService, config)),
+  ) as unknown as Layer.Layer<Service>
 }
 
 // PostgreSQL-specific layer that ignores OPENCODE_DATABASE_DIALECT.
 function postgresDatabaseLayer(url: string): Layer.Layer<Service> {
-  return Layer.effect(
-    Service,
-    Effect.gen(function* () {
-      const envConfig = yield* DatabaseConfig.loadEffect
-      const pgDb = yield* makePostgresDatabase
-      const db = compatPostgresDb(pgDb)
-
-      yield* DatabaseMigration.apply(db, "postgres")
-
-      return { db, config: { ...envConfig, dialect: "postgres" as const, postgresUrl: url } }
-    }).pipe(
-      Effect.provide(Layer.mergeAll(Global.defaultLayer, PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie))),
-      Effect.orDie,
-    ),
-  )
+  const config: DatabaseConfig.Config = {
+    dialect: "postgres",
+    sqliteFilename: DatabaseConfig.sqliteDefaultPath(),
+    postgresUrl: url,
+  }
+  return baseLayer.pipe(
+    Layer.provide(PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie)),
+    Layer.provide(Global.defaultLayer),
+    Layer.provide(Layer.succeed(DatabaseConfig.ConfigService, config)),
+  ) as unknown as Layer.Layer<Service>
 }
 
 export function layerFromPath(filename: string) {
@@ -158,14 +142,15 @@ export const defaultLayer = databaseDefaultLayer
 // the configured dialect.
 export const node = LayerNode.make(
   Layer.unwrap(
-    Effect.map(DatabaseConfig.loadEffect, (config) => {
+    Effect.sync(() => {
+      const config = DatabaseConfig.load()
       if (config.dialect === "postgres") {
-      if (!config.postgresUrl) {
-        return Layer.effect(
-          Service,
-          Effect.fail("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL"),
-        ) as Layer.Layer<Service>
-      }
+        if (!config.postgresUrl) {
+          return Layer.effect(
+            Service,
+            Effect.fail("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL"),
+          ) as Layer.Layer<Service>
+        }
         return postgresDatabaseLayer(config.postgresUrl)
       }
       return sqliteDatabaseLayer(config.sqliteFilename)
