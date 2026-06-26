@@ -131,3 +131,27 @@ export function makePostgresAdapter(
     },
   }) as DatabaseAdapter
 }
+
+export function makeMysqlAdapter(): DatabaseAdapter {
+  const die = <A = never, E = never>(): Effect.Effect<A, E, never> =>
+    Effect.die("OPENCODE_DATABASE_DIALECT=mysql is not implemented. See dialect.ts for supported dialects.") as Effect.Effect<A, E, never>
+
+  const stub = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === "run") return () => die()
+        if (prop === "all") return () => die()
+        if (prop === "get") return () => die()
+        if (prop === "select") return () => die()
+        if (prop === "insert") return () => die()
+        if (prop === "update") return () => die()
+        if (prop === "delete") return () => die()
+        if (prop === "transaction") return () => die()
+        return () => die()
+      },
+    },
+  )
+
+  return stub as unknown as DatabaseAdapter
+}

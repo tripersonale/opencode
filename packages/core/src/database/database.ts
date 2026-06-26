@@ -5,7 +5,7 @@ import { layer as sqliteLayer } from "#sqlite"
 import * as EffectDrizzlePostgres from "drizzle-orm/effect-postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Context, Effect, Layer, Redacted } from "effect"
-import { makeSqliteAdapter, makePostgresAdapter, type DatabaseAdapter } from "./adapter"
+import { makeSqliteAdapter, makePostgresAdapter, makeMysqlAdapter, type DatabaseAdapter } from "./adapter"
 import { Global } from "../global"
 import { DatabaseMigration } from "./migration"
 import { LayerNode } from "../effect/layer-node"
@@ -42,6 +42,15 @@ const baseLayer = Layer.effect(
 
       yield* DatabaseMigration.apply(db, config.dialect)
 
+      return { db, config }
+    }
+
+    if (config.dialect === "mysql") {
+      if (!config.mysqlUrl) {
+        return yield* Effect.die("OPENCODE_DATABASE_DIALECT=mysql requires OPENCODE_DATABASE_URL")
+      }
+      const db = makeMysqlAdapter()
+      yield* DatabaseMigration.apply(db, config.dialect)
       return { db, config }
     }
 
