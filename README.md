@@ -115,6 +115,23 @@ This is used internally and can be invoked using `@general` in messages.
 
 Learn more about [agents](https://opencode.ai/docs/agents).
 
+### Database
+
+This fork adds multi-database support. By default OpenCode uses SQLite. PostgreSQL
+is fully supported. MySQL is a stub that fails fast.
+
+```bash
+# SQLite (default)
+unset OPENCODE_DATABASE_DIALECT
+
+# PostgreSQL
+export OPENCODE_DATABASE_DIALECT=postgres
+export OPENCODE_DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+```
+
+See [docs/databases.md](./docs/databases.md) for details on the adapter,
+transactions, BIGINT normalization, and compliance notes.
+
 ### Documentation
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
