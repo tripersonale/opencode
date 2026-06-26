@@ -2,37 +2,20 @@ export * as DatabaseMigration from "./migration"
 
 import { sql } from "drizzle-orm"
 import { Effect, Semaphore } from "effect"
-import type { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
+import type { DatabaseAdapter } from "./adapter"
 import { migrations } from "./migration.gen"
 import sqliteSchema from "./schema.gen"
 import pgSchema from "./schema.gen.pg"
 import type { Dialect } from "./dialect"
 
-// The Service always exposes a SQLite-shaped database object. For PostgreSQL
-// the underlying driver is PG but we add SQLite-style run/all/get helpers so
-// existing migrations and schema files keep working while the adapter is being
-// stabilized. See database.ts for the DB wrapper.
-type Database = EffectDrizzleSqlite.EffectSQLiteDatabase
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 const lock = Semaphore.makeUnsafe(1)
+
+type Transaction = Parameters<Parameters<DatabaseAdapter["transaction"]>[0]>[0]
 
 export type Migration = {
   id: string
   up: (tx: Transaction) => Effect.Effect<void, unknown>
-}
-
-// Provide a SQLite-style surface on PostgreSQL transaction objects so that
-// schema files and TS migrations can keep calling tx.run/all/get.
-function compatTx(tx: any, dialect: Dialect): Transaction {
-  if (dialect === "postgres" && typeof tx.run !== "function") {
-    return Object.assign(tx, {
-      run: (query: unknown) => tx.execute(query).pipe(Effect.asVoid),
-      all: (query: unknown) => tx.execute(query),
-      get: (query: unknown) => tx.execute(query).pipe(Effect.map((rows: ReadonlyArray<unknown>) => rows[0])),
-    })
-  }
-  return tx as Transaction
 }
 
 function listTablesQuery(dialect: Dialect) {
@@ -81,7 +64,7 @@ function insertMigrationQuery(dialect: Dialect, migration: Migration) {
   return sql`INSERT INTO ${sql.identifier("migration")} (id, time_completed) VALUES (${migration.id}, ${Date.now()})`
 }
 
-export function apply(db: Database, dialect: Dialect) {
+export function apply(db: DatabaseAdapter, dialect: Dialect) {
   return lock.withPermit(
     Effect.gen(function* () {
       const schema = dialect === "postgres" ? pgSchema : sqliteSchema
@@ -90,11 +73,10 @@ export function apply(db: Database, dialect: Dialect) {
       if (tables.length > 0) return yield* Effect.die("Database is not empty and has no session table")
       yield* db.transaction((tx) =>
         Effect.gen(function* () {
-          const wrappedTx = compatTx(tx, dialect)
-          yield* schema.up(wrappedTx)
-          yield* wrappedTx.run(createMigrationTableQuery(dialect))
+          yield* schema.up(tx)
+          yield* tx.run(createMigrationTableQuery(dialect))
           yield* Effect.forEach(migrations, (migration) =>
-            wrappedTx.run(insertMigrationQuery(dialect, migration)),
+            tx.run(insertMigrationQuery(dialect, migration)),
           )
         }),
       )
@@ -102,7 +84,7 @@ export function apply(db: Database, dialect: Dialect) {
   ) as Effect.Effect<void, unknown, never>
 }
 
-export function applyOnly(db: Database, input: Migration[], dialect: Dialect) {
+export function applyOnly(db: DatabaseAdapter, input: Migration[], dialect: Dialect) {
   return Effect.gen(function* () {
     yield* db.run(createMigrationTableQuery(dialect))
     let completed = new Set(
@@ -125,9 +107,8 @@ export function applyOnly(db: Database, input: Migration[], dialect: Dialect) {
       if (completed.has(migration.id)) continue
       yield* db.transaction((tx) =>
         Effect.gen(function* () {
-          const wrappedTx = compatTx(tx, dialect)
-          yield* migration.up(wrappedTx)
-          yield* wrappedTx.run(insertMigrationQuery(dialect, migration))
+          yield* migration.up(tx)
+          yield* tx.run(insertMigrationQuery(dialect, migration))
         }),
       )
     }

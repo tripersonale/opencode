@@ -37,7 +37,7 @@ export const SessionTable = pgTable(
     summary_additions: integer(),
     summary_deletions: integer(),
     summary_files: integer(),
-    summary_diffs: jsonb().$type<Snapshot.FileDiff[]>(),
+    summary_diffs: jsonb().$type<Snapshot.LegacyFileDiff[]>(),
     metadata: jsonb().$type<Record<string, unknown>>(),
     cost: real().notNull().default(0),
     tokens_input: integer().notNull().default(0),
