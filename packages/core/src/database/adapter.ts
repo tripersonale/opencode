@@ -9,33 +9,15 @@ export type DatabaseShape = Effect.Success<typeof makeSqliteDatabase>
 
 export type DatabaseAdapter = DatabaseShape
 
-const numericPgFields = new Set([
-  "active",
-  "admitted_seq",
-  "baseline_seq",
-  "count",
-  "position",
-  "revision",
-  "seq",
-  "time_archived",
-  "time_completed",
-  "time_created",
-  "time_updated",
-  "time_initialized",
-  "time_used",
-  "tokens_cache_read",
-  "tokens_cache_write",
-  "tokens_input",
-  "tokens_output",
-  "tokens_reasoning",
-])
-
 function normalizePgRow(row: unknown): unknown {
   if (!row || typeof row !== "object" || Array.isArray(row)) return row
   const next: Record<string, unknown> = { ...(row as Record<string, unknown>) }
   for (const [key, value] of Object.entries(next)) {
-    if (numericPgFields.has(key) && typeof value === "string" && /^-?\d+$/.test(value)) {
-      next[key] = Number(value)
+    if (typeof value === "string" && /^-?\d+$/.test(value)) {
+      const num = Number(value)
+      if (next[key] !== num) {
+        next[key] = num
+      }
     }
   }
   return next
@@ -128,11 +110,13 @@ export function makePostgresAdapter(
                     return (query: unknown) => txTarget.execute(query).pipe(Effect.asVoid)
                   }
                   if (txProp === "all") {
-                    return (query: unknown) => txTarget.execute(query)
+                    return (query: unknown) => txTarget.execute(query).pipe(Effect.map(normalizePgRows))
                   }
                   if (txProp === "get") {
                     return (query: unknown) =>
-                      txTarget.execute(query).pipe(Effect.map((rows: ReadonlyArray<unknown>) => rows[0]))
+                      txTarget.execute(query).pipe(
+                        Effect.map((rows: ReadonlyArray<unknown>) => normalizePgRow(rows[0])),
+                      )
                   }
                   return Reflect.get(txTarget, txProp, txReceiver)
                 },
