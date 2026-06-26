@@ -89,14 +89,14 @@ function sqliteDatabaseLayer(filename: string): Layer.Layer<Service> {
 }
 
 // PostgreSQL-specific layer that ignores OPENCODE_DATABASE_DIALECT.
-function postgresDatabaseLayer(url: string): Layer.Layer<Service> {
+function postgresDatabaseLayer(url: Redacted.Redacted<string>): Layer.Layer<Service> {
   const config: DatabaseConfig.Config = {
     dialect: "postgres",
     sqliteFilename: DatabaseConfig.sqliteDefaultPath(),
     postgresUrl: url,
   }
   return baseLayer.pipe(
-    Layer.provide(PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie)),
+    Layer.provide(PgClient.layer({ url }).pipe(Layer.orDie)),
     Layer.provide(Global.defaultLayer),
     Layer.provide(Layer.succeed(DatabaseConfig.ConfigService, config)),
   ) as unknown as Layer.Layer<Service>
@@ -121,7 +121,7 @@ const databaseDefaultLayer = (() => {
       throw new Error("OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL")
     }
     return layer.pipe(
-      Layer.provide(PgClient.layer({ url: Redacted.make(config.postgresUrl) }).pipe(Layer.orDie)),
+      Layer.provide(PgClient.layer({ url: config.postgresUrl! }).pipe(Layer.orDie)),
       Layer.provide(Global.defaultLayer),
     )
   }

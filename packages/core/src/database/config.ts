@@ -1,6 +1,7 @@
 export * as DatabaseConfig from "./config"
 
 import * as Context from "effect/Context"
+import * as Redacted from "effect/Redacted"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Global from "../global"
@@ -12,8 +13,8 @@ import * as DialectModule from "./dialect"
 export interface Config {
   readonly dialect: Dialect
   readonly sqliteFilename: string
-  readonly postgresUrl?: string
-  readonly mysqlUrl?: string
+  readonly postgresUrl?: Redacted.Redacted<string>
+  readonly mysqlUrl?: Redacted.Redacted<string>
 }
 
 // Context tag used to inject a database configuration into the layer graph.
@@ -55,7 +56,7 @@ export function load(): Config {
         "OPENCODE_DATABASE_DIALECT=postgres requires OPENCODE_DATABASE_URL to be set",
       )
     }
-    return { dialect, sqliteFilename: sqliteDefaultPath(), postgresUrl: url }
+    return { dialect, sqliteFilename: sqliteDefaultPath(), postgresUrl: Redacted.make(url) }
   }
 
   if (dialect === "mysql") {
@@ -65,7 +66,7 @@ export function load(): Config {
         "OPENCODE_DATABASE_DIALECT=mysql requires OPENCODE_DATABASE_URL to be set",
       )
     }
-    return { dialect, sqliteFilename: sqliteDefaultPath(), mysqlUrl: url }
+    return { dialect, sqliteFilename: sqliteDefaultPath(), mysqlUrl: Redacted.make(url) }
   }
 
   return { dialect, sqliteFilename: sqliteDefaultPath() }

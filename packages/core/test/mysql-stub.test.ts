@@ -21,9 +21,9 @@ describe("DatabaseAdapter MySQL stub", () => {
     expect(exit._tag).toBe("Failure")
   })
 
-  test("select() yields not-implemented error", async () => {
+  test("select() chain yields not-implemented error", async () => {
     const db = makeMysqlAdapter()
-    const exit = await Effect.runPromise(Effect.exit(db.select()))
+    const exit = await Effect.runPromise(Effect.exit(db.select() as unknown as Effect.Effect<unknown, never, never>))
     expect(exit._tag).toBe("Failure")
   })
 
