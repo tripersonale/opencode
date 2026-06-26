@@ -11,15 +11,15 @@ import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClien
 
 const POSTGRES_URL = process.env.OPENCODE_DATABASE_URL ?? "postgresql://trip:trip@localhost:5432/opencode_test"
 
-const runSqlite = <A, E>(effect: Effect.Effect<A, E, never>) =>
+const runSqlite = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })),
       Effect.scoped,
-    ) as Effect.Effect<A, E, never>,
+    )
   )
 
-const runFull = <A, E>(effect: Effect.Effect<A, E, never>) =>
+const runFull = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(
@@ -29,7 +29,7 @@ const runFull = <A, E>(effect: Effect.Effect<A, E, never>) =>
         ),
       ),
       Effect.scoped,
-    ) as Effect.Effect<A, E, never>,
+    )
   )
 
 describe("DatabaseArchive", () => {
