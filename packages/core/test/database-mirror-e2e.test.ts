@@ -70,7 +70,7 @@ describe("DatabaseMirror end-to-end", () => {
         }
 
         const count = yield* pg.get(sql`SELECT count(*) AS n FROM ${sql.raw(TABLE)}`)
-        expect(Number(count?.n)).toBe(3)
+        expect(Number((count as any)?.n)).toBe(3)
 
         const rows = yield* pg.all(sql`SELECT * FROM ${sql.raw(TABLE)} ORDER BY id`)
         expect(rows.length).toBe(3)
