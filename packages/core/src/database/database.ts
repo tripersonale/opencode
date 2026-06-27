@@ -8,7 +8,7 @@ import { Context, Effect, Layer, Redacted } from "effect"
 import { makeSqliteAdapter, makePostgresAdapter, makeMysqlAdapter, type DatabaseAdapter } from "./adapter"
 import { Global } from "../global"
 import { DatabaseMigration } from "./migration"
-import { LayerNode } from "../effect/layer-node"
+import { makeGlobalNode } from "../effect/node"
 import * as DatabaseConfig from "./config"
 
 const makeSqliteDatabase = EffectDrizzleSqlite.makeWithDefaults()
@@ -135,7 +135,7 @@ export const defaultLayer = databaseDefaultLayer
 // Tests that need to force SQLite must use `Database.layerFromPath` directly
 // and explicitly provide their own Database.node replacement; this node follows
 // the configured dialect.
-export const node = LayerNode.make({
+export const node = makeGlobalNode({
   service: Service,
   layer: Layer.unwrap(
     Effect.sync(() => {
@@ -158,5 +158,5 @@ export const node = LayerNode.make({
 // Test helper: a Database.node replacement that always uses SQLite, regardless
 // of OPENCODE_DATABASE_DIALECT. Use this in tests that want to force SQLite.
 export function nodeFromPath(filename: string) {
-  return LayerNode.make({ service: Service, layer: sqliteDatabaseLayer(filename), deps: [] as const })
+  return makeGlobalNode({ service: Service, layer: sqliteDatabaseLayer(filename), deps: [] as const })
 }
