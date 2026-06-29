@@ -8,7 +8,7 @@ import { Context, Effect, Layer, Redacted } from "effect"
 import { makeSqliteAdapter, makePostgresAdapter, makeMysqlAdapter, type DatabaseAdapter } from "./adapter"
 import { Global } from "../global"
 import { DatabaseMigration } from "./migration"
-import { makeGlobalNode } from "../effect/node"
+import { makeGlobalNode } from "../effect/app-node"
 import * as DatabaseConfig from "./config"
 
 const makeSqliteDatabase = EffectDrizzleSqlite.makeWithDefaults()
