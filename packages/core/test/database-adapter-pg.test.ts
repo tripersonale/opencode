@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer } from "effect"
 import { sql } from "drizzle-orm"
 import { pgTable, bigint, text } from "drizzle-orm/pg-core"
 import * as EffectDrizzlePostgres from "drizzle-orm/effect-postgres"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import { makePostgresAdapter } from "@opencode-ai/core/database/adapter"
+import { TEST_POSTGRES_URL, testPgClientLayer } from "./database-test-pg"
 
-const POSTGRES_URL = process.env.OPENCODE_DATABASE_URL ?? "postgresql://trip:trip@localhost:5432/opencode_test"
-
-const pgClientLayer = PgClient.layer({ url: Redacted.make(POSTGRES_URL) }).pipe(Layer.orDie)
+const pgClientLayer = testPgClientLayer
 const makePg = EffectDrizzlePostgres.makeWithDefaults()
 
 const AdapterTable = pgTable("adapter_pg_qb", {

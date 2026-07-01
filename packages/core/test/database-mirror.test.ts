@@ -16,8 +16,9 @@ import {
   type MirrorQueueState,
 } from "@opencode-ai/core/database/database-mirror"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
+import { TEST_POSTGRES_URL } from "./database-test-pg"
 
-const POSTGRES_URL = process.env.OPENCODE_DATABASE_URL ?? "postgresql://trip:trip@localhost:5432/opencode_test"
+const POSTGRES_URL = TEST_POSTGRES_URL
 
 const runSqlite = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(

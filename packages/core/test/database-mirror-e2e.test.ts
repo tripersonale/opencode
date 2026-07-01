@@ -6,8 +6,9 @@ import { sql } from "drizzle-orm"
 import { makePostgresAdapter } from "@opencode-ai/core/database/adapter"
 import { serializeSQL, loadMirrorQueue, saveMirrorQueue } from "@opencode-ai/core/database/database-mirror"
 import { $ } from "bun"
+import { TEST_POSTGRES_URL } from "./database-test-pg"
 
-const URL = "postgresql://trip:trip@localhost:5432/opencode_test"
+const URL = TEST_POSTGRES_URL
 const TABLE = "mirror_e2e_v12"
 const QUEUE = "/tmp/mirror-e2e-v12-queue.json"
 
@@ -15,7 +16,11 @@ const pgLayer = PgClient.layer({ url: Redacted.make(URL) }).pipe(Layer.orDie)
 const runPg = (eff: any) => Effect.runPromise(eff.pipe(Effect.provide(pgLayer), Effect.scoped) as any)
 
 async function psql(cmd: string) {
-  await $`PGPASSWORD=trip psql -h localhost -U trip -d opencode_test -c ${cmd}`.quiet()
+  const url = new globalThis.URL(URL)
+  const user = url.username || "postgres"
+  const password = url.password || ""
+  const db = url.pathname.slice(1) || "opencode_test"
+  await $`PGPASSWORD=${password} psql -h localhost -U ${user} -d ${db} -c ${cmd}`.quiet()
 }
 
 describe("DatabaseMirror end-to-end", () => {
