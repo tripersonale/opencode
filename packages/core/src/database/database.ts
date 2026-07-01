@@ -23,11 +23,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
 
-// Base layer that builds the Database service. Runtime requirements depend on
-// the configured dialect (SQLite client or PgClient). We cast to a no-context
-// layer because callers provide the concrete client layer via layerFromPath or
-// defaultLayer. This preserves the existing test API while allowing PG support.
-const baseLayer = Layer.effect(
+const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* DatabaseConfig.loadEffect
