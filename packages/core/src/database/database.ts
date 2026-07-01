@@ -23,7 +23,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
 
-const layer = Layer.effect(
+const baseLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* DatabaseConfig.loadEffect
@@ -93,7 +93,7 @@ function postgresDatabaseLayer(url: Redacted.Redacted<string>): Layer.Layer<Serv
   }
   return baseLayer.pipe(
     Layer.provide(PgClient.layer({ url }).pipe(Layer.orDie)),
-    Layer.provide(Global.defaultLayer),
+    Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>),
     Layer.provide(Layer.succeed(DatabaseConfig.ConfigService, config)),
   ) as unknown as Layer.Layer<Service>
 }
@@ -118,10 +118,10 @@ const databaseDefaultLayer = (() => {
     }
     return layer.pipe(
       Layer.provide(PgClient.layer({ url: config.postgresUrl! }).pipe(Layer.orDie)),
-      Layer.provide(Global.defaultLayer),
+      Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>),
     )
   }
-  return layerFromPath(path()).pipe(Layer.provide(Global.defaultLayer))
+  return layerFromPath(path()).pipe(Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>))
 })()
 
 export const defaultLayer = databaseDefaultLayer

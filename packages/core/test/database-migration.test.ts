@@ -271,7 +271,7 @@ describe("DatabaseMigration", () => {
         yield* DatabaseMigration.applyOnly(db, [simplifySessionInputMigration], "sqlite")
 
         const database = Layer.succeed(Database.Service, { db, config: { dialect: 'sqlite' as const, sqliteFilename: ':memory:' } })
-        const events = EventV2.layer.pipe(Layer.provide(database))
+        const events = Layer.provide(EventV2.node.implementation as Layer.Layer<EventV2.Service>, database)
         yield* EventV2.Service.use((service) =>
           service.publish(SessionV1.Event.Updated, {
             sessionID: SessionSchema.ID.make("session"),
