@@ -7,7 +7,7 @@ import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { Database } from "./database/database"
 import { EventSequenceTable, EventTable } from "./event/sql"
 import { Location } from "./location"
-import { makeGlobalNode } from "./effect/app-node"
+import { makeGlobalNode } from "./effect/node"
 import { isDeepStrictEqual } from "node:util"
 import { Durable } from "@opencode-ai/schema/durable-event-manifest"
 
@@ -647,5 +647,7 @@ export const layerWith = (options?: LayerOptions) =>
     }),
   )
 
-const layer = layerWith()
+export const layer = layerWith()
 export const node = makeGlobalNode({ service: Service, layer: layer, deps: [Database.node] })
+
+export const defaultLayer = layer.pipe(Layer.provide(Database.defaultLayer))

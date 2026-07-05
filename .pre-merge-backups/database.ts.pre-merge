@@ -8,7 +8,7 @@ import { Context, Effect, Layer, Redacted } from "effect"
 import { makeSqliteAdapter, makePostgresAdapter, makeMysqlAdapter, type DatabaseAdapter } from "./adapter"
 import { Global } from "../global"
 import { DatabaseMigration } from "./migration"
-import { makeGlobalNode } from "../effect/app-node"
+import { makeGlobalNode } from "../effect/node"
 import * as DatabaseConfig from "./config"
 
 const makeSqliteDatabase = EffectDrizzleSqlite.makeWithDefaults()
@@ -23,6 +23,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
 
+// Base layer that builds the Database service. Runtime requirements depend on
+// the configured dialect (SQLite client or PgClient). We cast to a no-context
+// layer because callers provide the concrete client layer via layerFromPath or
+// defaultLayer. This preserves the existing test API while allowing PG support.
 const baseLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -93,7 +97,7 @@ function postgresDatabaseLayer(url: Redacted.Redacted<string>): Layer.Layer<Serv
   }
   return baseLayer.pipe(
     Layer.provide(PgClient.layer({ url }).pipe(Layer.orDie)),
-    Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>),
+    Layer.provide(Global.defaultLayer),
     Layer.provide(Layer.succeed(DatabaseConfig.ConfigService, config)),
   ) as unknown as Layer.Layer<Service>
 }
@@ -118,10 +122,10 @@ const databaseDefaultLayer = (() => {
     }
     return layer.pipe(
       Layer.provide(PgClient.layer({ url: config.postgresUrl! }).pipe(Layer.orDie)),
-      Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>),
+      Layer.provide(Global.defaultLayer),
     )
   }
-  return layerFromPath(path()).pipe(Layer.provide(Global.node.implementation as Layer.Layer<Global.Service>))
+  return layerFromPath(path()).pipe(Layer.provide(Global.defaultLayer))
 })()
 
 export const defaultLayer = databaseDefaultLayer

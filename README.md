@@ -8,6 +8,9 @@
   </a>
 </p>
 <p align="center">The open source AI coding agent.</p>
+
+> **Fork** di [anomalyco/opencode](https://github.com/anomalyco/opencode) con supporto multi-database PostgreSQL.  
+> Modifiche sul branch [`feat/multi-database-backend`](https://github.com/tripersonale/opencode/tree/feat/multi-database-backend).
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
@@ -111,6 +114,23 @@ Also included is a **general** subagent for complex searches and multistep tasks
 This is used internally and can be invoked using `@general` in messages.
 
 Learn more about [agents](https://opencode.ai/docs/agents).
+
+### Database
+
+This fork adds multi-database support. By default OpenCode uses SQLite. PostgreSQL
+is fully supported. MySQL is a stub that fails fast.
+
+```bash
+# SQLite (default)
+unset OPENCODE_DATABASE_DIALECT
+
+# PostgreSQL
+export OPENCODE_DATABASE_DIALECT=postgres
+export OPENCODE_DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+```
+
+See [docs/databases.md](./docs/databases.md) for details on the adapter,
+transactions, BIGINT normalization, and compliance notes.
 
 ### Documentation
 
