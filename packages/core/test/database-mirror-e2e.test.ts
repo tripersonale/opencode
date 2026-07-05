@@ -7,15 +7,26 @@ import { makePostgresAdapter } from "@opencode-ai/core/database/adapter"
 import { serializeSQL, loadMirrorQueue, saveMirrorQueue } from "@opencode-ai/core/database/database-mirror"
 import { $ } from "bun"
 
-const URL = process.env.OPENCODE_TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/opencode_test"
+const POSTGRES_URL = process.env.OPENCODE_TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/opencode_test"
 const TABLE = "mirror_e2e_v12"
 const QUEUE = "/tmp/mirror-e2e-v12-queue.json"
 
-const pgLayer = PgClient.layer({ url: Redacted.make(URL) }).pipe(Layer.orDie)
+const pgLayer = PgClient.layer({ url: Redacted.make(POSTGRES_URL) }).pipe(Layer.orDie)
 const runPg = (eff: any) => Effect.runPromise(eff.pipe(Effect.provide(pgLayer), Effect.scoped) as any)
+function parsePostgresUrl(url: string): { user: string; password: string; db: string; host: string; port: string } {
+  const u = new URL(url)
+  return {
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    db: decodeURIComponent(u.pathname.slice(1)),
+    host: u.hostname,
+    port: u.port || "5432",
+  }
+}
 
 async function psql(cmd: string) {
-  await $`PGPASSWORD=trip psql -h localhost -U trip -d opencode_test -c ${cmd}`.quiet()
+  const { user, password, db, host, port } = parsePostgresUrl(POSTGRES_URL)
+  await $`PGPASSWORD=${password} psql -h ${host} -p ${port} -U ${user} -d ${db} -c ${cmd}`.quiet()
 }
 
 describe("DatabaseMirror end-to-end", () => {
