@@ -7,7 +7,7 @@ import { makePostgresAdapter } from "@opencode-ai/core/database/adapter"
 import { serializeSQL, loadMirrorQueue, saveMirrorQueue } from "@opencode-ai/core/database/database-mirror"
 import { $ } from "bun"
 
-const URL = "postgresql://trip:trip@localhost:5432/opencode_test"
+const URL = process.env.OPENCODE_TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/opencode_test"
 const TABLE = "mirror_e2e_v12"
 const QUEUE = "/tmp/mirror-e2e-v12-queue.json"
 

@@ -6,7 +6,7 @@ import * as EffectDrizzlePostgres from "drizzle-orm/effect-postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { makePostgresAdapter } from "@opencode-ai/core/database/adapter"
 
-const POSTGRES_URL = process.env.OPENCODE_DATABASE_URL ?? "postgresql://trip:trip@localhost:5432/opencode_test"
+const POSTGRES_URL = process.env.OPENCODE_TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/opencode_test"
 
 const pgClientLayer = PgClient.layer({ url: Redacted.make(POSTGRES_URL) }).pipe(Layer.orDie)
 const makePg = EffectDrizzlePostgres.makeWithDefaults()

@@ -9,7 +9,7 @@ import { runArchive, startArchiveWorker } from "@opencode-ai/core/database/datab
 import { makeSqliteAdapter, makePostgresAdapter } from "@opencode-ai/core/database/adapter"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 
-const POSTGRES_URL = process.env.OPENCODE_DATABASE_URL ?? "postgresql://trip:trip@localhost:5432/opencode_test"
+const POSTGRES_URL = process.env.OPENCODE_TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/opencode_test"
 
 const runSqlite = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(
