@@ -74,7 +74,10 @@ Rollback happens automatically if the Effect fails inside the transaction callba
 |------|----------|
 | `test/database-adapter.test.ts` | SQLite adapter unit |
 | `test/database-adapter-pg.test.ts` | PostgreSQL adapter (BIGINT, tx rollback, query builders) |
-| `test/database-migration.test.ts` | Migration application under both dialects |
+| `test/database-migration.test.ts` | Migration application under SQLite |
+| `test/database-mirror.test.ts` | Write-behind mirror queue |
+| `test/database-mirror-e2e.test.ts` | End-to-end mirror drain to PostgreSQL |
+| `test/database-archive.test.ts` | Cold-archive worker |
 | `test/mysql-stub.test.ts` | MySQL not-implemented error |
 
 Run tests:
@@ -84,9 +87,8 @@ Run tests:
 bun test packages/core/test/database-adapter.test.ts
 
 # PostgreSQL
-OPENCODE_DATABASE_DIALECT=postgres \
-OPENCODE_DATABASE_URL='postgresql://...' \
-  bun test packages/core/test/database-adapter-pg.test.ts
+export OPENCODE_TEST_DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+bun test packages/core/test/database-adapter-pg.test.ts
 ```
 
 ## Compliance
