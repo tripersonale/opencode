@@ -26,6 +26,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import sessionMetadataMigration from "@opencode-ai/core/database/migration/20260511173437_session-metadata"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@opencode-ai/core/database/database"
+import { makeSqliteAdapter } from "@opencode-ai/core/database/adapter"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { tmpdir } from "./fixture/tmpdir"
@@ -63,8 +64,8 @@ describe("DatabaseMigration", () => {
   test("applies tracked migrations to an empty database", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
-        yield* DatabaseMigration.apply(db)
+        const db = makeSqliteAdapter(yield* makeDb)
+        yield* DatabaseMigration.apply(db, "sqlite")
 
         expect(yield* db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'`)).toEqual({
           name: "session",
@@ -103,9 +104,9 @@ describe("DatabaseMigration", () => {
     await expect(
       run(
         Effect.gen(function* () {
-          const db = yield* makeDb
+          const db = makeSqliteAdapter(yield* makeDb)
           yield* db.run(sql`CREATE TABLE unrelated (id text PRIMARY KEY)`)
-          yield* DatabaseMigration.apply(db)
+          yield* DatabaseMigration.apply(db, "sqlite")
         }),
       ),
     ).rejects.toThrow("Database is not empty and has no session table")
@@ -114,7 +115,7 @@ describe("DatabaseMigration", () => {
   test("backfills existing Context Epoch rows to the build agent", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(
           sql`CREATE TABLE session_context_epoch (session_id text PRIMARY KEY, baseline text NOT NULL, snapshot text NOT NULL, baseline_seq integer NOT NULL, replacement_seq integer, revision integer DEFAULT 0 NOT NULL)`,
         )
@@ -122,7 +123,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_context_epoch (session_id, baseline, snapshot, baseline_seq) VALUES ('ses_existing', 'baseline', '{}', 0)`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [contextEpochAgentMigration])
+        yield* DatabaseMigration.applyOnly(db, [contextEpochAgentMigration], "sqlite")
 
         expect(yield* db.get(sql`SELECT agent FROM session_context_epoch WHERE session_id = 'ses_existing'`)).toEqual({
           agent: "build",
@@ -134,14 +135,14 @@ describe("DatabaseMigration", () => {
   test("keeps legacy credential fields nullable", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(
           sql`CREATE TABLE credential (id text PRIMARY KEY, connector_id text NOT NULL, method_id text NOT NULL, label text NOT NULL, value text NOT NULL, active integer DEFAULT false NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
         )
         yield* db.run(
           sql`CREATE UNIQUE INDEX credential_connector_active_idx ON credential (connector_id) WHERE active = 1`,
         )
-        yield* DatabaseMigration.applyOnly(db, [simplifyIntegrationCredentialsMigration])
+        yield* DatabaseMigration.applyOnly(db, [simplifyIntegrationCredentialsMigration], "sqlite")
 
         yield* db.run(
           sql`INSERT INTO credential (id, connector_id, method_id, label, value, active, time_created, time_updated) VALUES ('legacy', 'openai', 'oauth', 'Legacy', '{}', 1, 1, 1)`,
@@ -159,7 +160,7 @@ describe("DatabaseMigration", () => {
   test("resets beta history and rebuilds event-sourced Session input storage", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, workspace_id text)`)
         yield* db.run(sql`CREATE TABLE workspace (id text PRIMARY KEY)`)
         yield* db.run(sql`CREATE TABLE message (id text PRIMARY KEY)`)
@@ -195,7 +196,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_input (id, session_id, prompt, delivery, time_created) VALUES ('msg_pending', 'session', '{}', 'steer', 1)`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [eventSourcedSessionInputMigration])
+        yield* DatabaseMigration.applyOnly(db, [eventSourcedSessionInputMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id, workspace_id FROM session`)).toEqual([
           { id: "session", workspace_id: null },
@@ -235,9 +236,9 @@ describe("DatabaseMigration", () => {
   test("preserves canonical V1 state and restarts its event stream", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`PRAGMA foreign_keys = ON`)
-        yield* DatabaseMigration.apply(db)
+        yield* DatabaseMigration.apply(db, "sqlite")
         yield* db.run(
           sql`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('global', '/project', 1, 1, '[]')`,
         )
@@ -267,9 +268,10 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_context_epoch (session_id, baseline, snapshot, baseline_seq) VALUES ('session', 'baseline', '{}', 9)`,
         )
         yield* db.run(sql`DELETE FROM migration WHERE id = ${simplifySessionInputMigration.id}`)
-        yield* DatabaseMigration.applyOnly(db, [simplifySessionInputMigration])
+        yield* DatabaseMigration.applyOnly(db, [simplifySessionInputMigration], "sqlite")
 
-        const database = Layer.succeed(Database.Service, { db })
+        const database = Layer.succeed(Database.Service, { db, config: { dialect: 'sqlite' as const, sqliteFilename: ':memory:' } })
+        const events = Layer.provide(EventV2.node.implementation as Layer.Layer<EventV2.Service>, database)
         yield* EventV2.Service.use((service) =>
           service.publish(SessionV1.Event.Updated, {
             sessionID: SessionSchema.ID.make("session"),
@@ -322,7 +324,7 @@ describe("DatabaseMigration", () => {
   test("resets incompatible projected Session messages before adding sequence order", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY)`)
         yield* db.run(
           sql`CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)`,
@@ -351,7 +353,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session_message (id, session_id, type, time_created, time_updated, data) VALUES ('stale_projection', 'session', 'user', 1, 1, '{}')`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMessageProjectionOrderMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMessageProjectionOrderMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id, session_id, data FROM message`)).toEqual([
           { id: "legacy_message", session_id: "session", data: '{"role":"user"}' },
@@ -377,7 +379,7 @@ describe("DatabaseMigration", () => {
   test("runs session usage backfill in order with schema changes", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, time_updated integer NOT NULL)`)
         yield* db.run(sql`CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, data text NOT NULL)`)
         yield* db.run(sql`INSERT INTO session (id, time_updated) VALUES ('session_1', 1)`)
@@ -385,7 +387,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO message (id, session_id, data) VALUES ('message_1', 'session_1', '{"role":"assistant","cost":1.25,"tokens":{"input":2,"output":3,"reasoning":4,"cache":{"read":5,"write":6}}}')`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [sessionUsageMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionUsageMigration], "sqlite")
 
         expect(
           yield* db.get(
@@ -406,7 +408,7 @@ describe("DatabaseMigration", () => {
   test("normalizes Windows storage paths and leaves POSIX paths untouched", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE project (id text PRIMARY KEY, worktree text NOT NULL, sandboxes text NOT NULL)`)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, directory text NOT NULL, path text)`)
         // Windows-shaped rows (drive + backslash) must be normalized.
@@ -431,7 +433,7 @@ describe("DatabaseMigration", () => {
           sql`INSERT INTO session (id, directory, path) VALUES (${"posix"}, ${"/home/me/we\\ird"}, ${"src\\weird"})`,
         )
 
-        yield* DatabaseMigration.applyOnly(db, [normalizeStoragePathsMigration])
+        yield* DatabaseMigration.applyOnly(db, [normalizeStoragePathsMigration], "sqlite")
 
         expect(yield* db.get(sql`SELECT worktree, sandboxes FROM project WHERE id = 'win'`)).toEqual({
           worktree: "C:/Repo/Thing",
@@ -458,8 +460,8 @@ describe("DatabaseMigration", () => {
     if (process.platform !== "win32") return
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
-        yield* DatabaseMigration.apply(db)
+        const db = makeSqliteAdapter(yield* makeDb)
+        yield* DatabaseMigration.apply(db, "sqlite")
         const projectID = ProjectV2.ID.make("codec_project")
         const worktree = AbsolutePath.make("C:\\Repo\\Thing")
         const sandbox = AbsolutePath.make("C:\\Repo\\Thing\\sandbox")
@@ -567,7 +569,7 @@ describe("DatabaseMigration", () => {
   test("imports existing drizzle migration state", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(
           sql`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash text NOT NULL, created_at numeric, name text, applied_at TEXT)`,
         )
@@ -576,7 +578,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260127222353_familiar_lady_ursula', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [])
+        yield* DatabaseMigration.applyOnly(db, [], "sqlite")
 
         expect(yield* db.get(sql`SELECT id FROM migration`)).toEqual({ id: "20260127222353_familiar_lady_ursula" })
       }),
@@ -586,7 +588,7 @@ describe("DatabaseMigration", () => {
   test("does not replay a migrated session metadata column", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, metadata text)`)
         yield* db.run(
           sql`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash text NOT NULL, created_at numeric, name text, applied_at TEXT)`,
@@ -596,7 +598,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260511173437_session-metadata', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration`)).toEqual([{ id: "20260511173437_session-metadata" }])
       }),
@@ -606,12 +608,12 @@ describe("DatabaseMigration", () => {
   test("accepts the temporary replacement session metadata migration id", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, metadata text)`)
         yield* db.run(sql`CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)`)
         yield* db.run(sql`INSERT INTO migration (id, time_completed) VALUES ('20260530232709_lovely_romulus', 1)`)
 
-        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration])
+        yield* DatabaseMigration.applyOnly(db, [sessionMetadataMigration], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration ORDER BY id`)).toEqual([
           { id: "20260511173437_session-metadata" },
@@ -624,7 +626,7 @@ describe("DatabaseMigration", () => {
   test("skips drizzle import when migration table already has state", async () => {
     await run(
       Effect.gen(function* () {
-        const db = yield* makeDb
+        const db = makeSqliteAdapter(yield* makeDb)
         yield* db.run(sql`CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)`)
         yield* db.run(sql`INSERT INTO migration (id, time_completed) VALUES ('existing', 1)`)
         yield* db.run(
@@ -635,7 +637,7 @@ describe("DatabaseMigration", () => {
           VALUES ('hash', 1, '20260127222353_familiar_lady_ursula', ${new Date().toISOString()})
         `)
 
-        yield* DatabaseMigration.applyOnly(db, [])
+        yield* DatabaseMigration.applyOnly(db, [], "sqlite")
 
         expect(yield* db.all(sql`SELECT id FROM migration ORDER BY id`)).toEqual([{ id: "existing" }])
       }),

@@ -16,6 +16,7 @@ import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
+import { ConfigDatabase } from "../../config/database"
 
 export type Layout = ConfigLayoutV1.Layout
 
@@ -184,6 +185,12 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  database: ConfigDatabase.Info.pipe(Schema.optional).annotate({
+    description: "Database connection configuration",
+  }),
+  providers: Schema.Record(Schema.String, Schema.Unknown).pipe(Schema.optional).annotate({
+    description: "AI provider configuration",
+  }),
 }).annotate({ identifier: "Config" })
 
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
