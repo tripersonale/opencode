@@ -34,7 +34,7 @@ import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -115,10 +115,15 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
       }
     }
 
-    return rows.map((row) => ({
-      info: info(row),
-      parts: partByMessage.get(row.id) ?? [],
-    }))
+    return rows.flatMap((row) => {
+      const i = info(row)
+      // Skip rows whose `data` is not a valid V1 Info (e.g. legacy V2-shaped data).
+      if (Option.isNone(Schema.decodeUnknownOption(Info)(i))) return []
+      return [{
+        info: i,
+        parts: partByMessage.get(row.id) ?? [],
+      }]
+    })
   })
 }
 
