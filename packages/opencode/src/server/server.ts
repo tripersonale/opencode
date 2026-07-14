@@ -6,6 +6,7 @@ import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
+import { createGzip, constants as zlibConstants } from "node:zlib"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
@@ -56,13 +57,30 @@ class ListenerServerService extends Context.Service<ListenerServerService, Liste
 export const Default = lazy(() => {
   const handler = HttpApiApp.webHandler().handler
   const app: ServerApp = {
-    fetch: (request: Request) => handler(request, HttpApiApp.context),
+    fetch: (request: Request) => withGzip(request, () => handler(request, HttpApiApp.context)),
     request(input, init) {
       return app.fetch(input instanceof Request ? input : new Request(new URL(input, "http://localhost"), init))
     },
   }
   return { app }
 })
+
+function withGzip(request: Request, next: () => Promise<Response> | Response): Promise<Response> | Response {
+  const accept = request.headers.get("accept-encoding") || ""
+  if (!/\bgzip\b/i.test(accept)) return next()
+  return Promise.resolve(next()).then((res) => {
+    if (!res.body) return res
+    const ct = res.headers.get("content-type") || ""
+    if (!/json|text|javascript/.test(ct)) return res
+    const gzip = createGzip({ level: zlibConstants.Z_BEST_SPEED })
+    const stream = res.body.pipeThrough(gzip as any)
+    const headers = new Headers(res.headers)
+    headers.set("content-encoding", "gzip")
+    headers.delete("content-length")
+    headers.set("vary", "accept-encoding")
+    return new Response(stream as any, { status: res.status, statusText: res.statusText, headers })
+  })
+}
 
 export async function openapi() {
   return OpenApi.fromApi(PublicApi)
