@@ -834,7 +834,7 @@ const layer: Layer.Layer<
         )).items
       }
 
-      const size = 500
+      const size = 100
       const result = [] as SessionV1.WithParts[]
       let before: string | undefined
       while (true) {
@@ -888,7 +888,7 @@ const layer: Layer.Layer<
 
     /** Finds the first message matching the predicate, searching newest-first. */
     const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (sessionID, predicate) {
-      const size = 500
+      const size = 100
       let before: string | undefined
       while (true) {
         const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
