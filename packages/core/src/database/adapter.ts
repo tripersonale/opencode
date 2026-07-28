@@ -118,6 +118,14 @@ export function makePostgresAdapter(
                         Effect.map((rows: ReadonlyArray<unknown>) => normalizePgRow(rows[0])),
                       )
                   }
+                  if (txProp === "select" || txProp === "insert" || txProp === "update" || txProp === "delete") {
+                    const orig = txTarget[txProp]
+                    if (typeof orig === "function") {
+                      return function (this: any, ...args: any[]) {
+                        return patchEffectQuery(orig.apply(txTarget, args))
+                      }
+                    }
+                  }
                   return Reflect.get(txTarget, txProp, txReceiver)
                 },
               })
