@@ -703,9 +703,9 @@ const layer: Layer.Layer<
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()
-      const target = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
 
-      for (const msg of msgs.slice(0, target < 0 ? msgs.length : target)) {
+      for (const msg of msgs) {
+        if (input.messageID && msg.info.id >= input.messageID) break
         const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
@@ -834,7 +834,7 @@ const layer: Layer.Layer<
         )).items
       }
 
-      const size = 50
+      const size = 100
       const result = [] as SessionV1.WithParts[]
       let before: string | undefined
       while (true) {
@@ -888,7 +888,7 @@ const layer: Layer.Layer<
 
     /** Finds the first message matching the predicate, searching newest-first. */
     const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (sessionID, predicate) {
-      const size = 50
+      const size = 100
       let before: string | undefined
       while (true) {
         const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
