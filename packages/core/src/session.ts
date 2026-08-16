@@ -14,7 +14,7 @@ import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { EventV2 } from "./event"
 import { Database } from "./database/database"
 import { SessionProjector } from "./session/projector"
-import { SessionMessageTable, SessionTable } from "./session/sql"
+import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "./session/sql"
 import { SessionSchema } from "./session/schema"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema"
 import { AgentV2 } from "./agent"
@@ -204,6 +204,184 @@ const layer = Layer.effect(
         ),
       )
 
+    /** Read-only bridge: project legacy message+part rows into SessionMessage.Message. */
+    const legacyToV2 = Effect.fn("V2Session.legacyToV2")(function* (input: {
+      sessionID: SessionSchema.ID
+      limit?: number
+      order: "asc" | "desc"
+      cursorID?: string
+    }) {
+      const base = eq(MessageTable.session_id, input.sessionID)
+      const all = yield* db
+        .select()
+        .from(MessageTable)
+        .where(base)
+        .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+        .all()
+        .pipe(Effect.orDie)
+
+      const ids = all.map((row) => row.id)
+      const partRows =
+        ids.length === 0
+          ? []
+          : yield* db
+              .select()
+              .from(PartTable)
+              .where(and(eq(PartTable.session_id, input.sessionID)))
+              .orderBy(asc(PartTable.time_created), asc(PartTable.id))
+              .all()
+              .pipe(Effect.orDie)
+
+      const partsByMessage = new Map<string, (typeof partRows)[number][]>()
+      for (const row of partRows) {
+        const list = partsByMessage.get(row.message_id)
+        if (list) list.push(row)
+        else partsByMessage.set(row.message_id, [row])
+      }
+
+      const projected: SessionMessage.Message[] = []
+      for (const row of all) {
+        const raw = (typeof row.data === "string" ? JSON.parse(row.data as string) : row.data) as Record<
+          string,
+          any
+        >
+        const role = raw?.role as string | undefined
+        const created = Number(raw?.time?.created ?? row.time_created ?? 0)
+        const parts = partsByMessage.get(row.id) ?? []
+
+        if (role === "user") {
+          const textParts = parts
+            .map((p) => (typeof p.data === "string" ? JSON.parse(p.data as string) : p.data) as any)
+            .filter((p) => p?.type === "text" && typeof p.text === "string")
+            .map((p) => p.text as string)
+          const text = textParts.join("\n") || (typeof raw.text === "string" ? raw.text : "")
+          const msg = {
+            id: row.id,
+            type: "user" as const,
+            text,
+            files: [],
+            agents: [],
+            time: { created },
+          }
+          const decoded = yield* Effect.either(decodeMessage(msg))
+          if (decoded._tag === "Right") projected.push(decoded.right)
+          continue
+        }
+
+        if (role === "assistant") {
+          const content: any[] = []
+          for (const prow of parts) {
+            const p = (typeof prow.data === "string" ? JSON.parse(prow.data as string) : prow.data) as any
+            if (!p || typeof p !== "object") continue
+            if (p.type === "text" && typeof p.text === "string") {
+              content.push({ type: "text", id: prow.id, text: p.text })
+            } else if (p.type === "reasoning" && typeof p.text === "string") {
+              content.push({
+                type: "reasoning",
+                id: prow.id,
+                text: p.text,
+                time: {
+                  created: Number(p.time?.start ?? created),
+                  ...(p.time?.end !== undefined ? { completed: Number(p.time.end) } : {}),
+                },
+              })
+            } else if (p.type === "tool") {
+              const state = p.state ?? { status: "completed", input: {}, content: [], structured: {} }
+              const status = state.status ?? "completed"
+              let toolState: any
+              if (status === "pending") {
+                toolState = { status: "pending", input: typeof state.input === "string" ? state.input : JSON.stringify(state.input ?? {}) }
+              } else if (status === "running") {
+                toolState = {
+                  status: "running",
+                  input: state.input ?? {},
+                  structured: state.structured ?? {},
+                  content: Array.isArray(state.content) ? state.content : [{ type: "text", text: String(state.output ?? "") }],
+                }
+              } else if (status === "error") {
+                toolState = {
+                  status: "error",
+                  input: state.input ?? {},
+                  content: Array.isArray(state.content) ? state.content : [{ type: "text", text: String(state.error ?? "") }],
+                  structured: state.structured ?? {},
+                  error: { type: "unknown", message: String(state.error ?? "tool error") },
+                }
+              } else {
+                const outText = typeof state.output === "string" ? state.output : ""
+                toolState = {
+                  status: "completed",
+                  input: state.input ?? {},
+                  content: Array.isArray(state.content)
+                    ? state.content
+                    : outText
+                      ? [{ type: "text", text: outText }]
+                      : [],
+                  outputPaths: state.outputPaths ?? [],
+                  structured: state.structured ?? {},
+                }
+              }
+              content.push({
+                type: "tool",
+                id: p.callID ?? prow.id,
+                name: p.tool ?? "tool",
+                provider: { executed: false },
+                state: toolState,
+                time: {
+                  created: Number(p.time?.start ?? created),
+                  ...(p.time?.start !== undefined ? { ran: Number(p.time.start) } : {}),
+                  ...(p.time?.end !== undefined ? { completed: Number(p.time.end) } : {}),
+                },
+              })
+            }
+          }
+          if (content.length === 0 && typeof raw.text === "string" && raw.text) {
+            content.push({ type: "text", id: row.id + "_text", text: raw.text })
+          }
+          const modelID = raw.modelID ?? raw.model?.modelID ?? raw.model?.id ?? "unknown"
+          const providerID = raw.providerID ?? raw.model?.providerID ?? "unknown"
+          const msg = {
+            id: row.id,
+            type: "assistant" as const,
+            agent: raw.agent ?? raw.mode ?? "build",
+            model: { id: modelID, providerID },
+            content,
+            ...(raw.finish !== undefined ? { finish: raw.finish } : {}),
+            ...(raw.cost !== undefined ? { cost: raw.cost } : {}),
+            ...(raw.tokens
+              ? {
+                  tokens: {
+                    input: Number(raw.tokens.input ?? 0),
+                    output: Number(raw.tokens.output ?? 0),
+                    reasoning: Number(raw.tokens.reasoning ?? 0),
+                    cache: {
+                      read: Number(raw.tokens.cache?.read ?? 0),
+                      write: Number(raw.tokens.cache?.write ?? 0),
+                    },
+                  },
+                }
+              : {}),
+            time: {
+              created,
+              ...(raw.time?.completed !== undefined ? { completed: Number(raw.time.completed) } : {}),
+            },
+          }
+          const decoded = yield* Effect.either(decodeMessage(msg))
+          if (decoded._tag === "Right") projected.push(decoded.right)
+        }
+      }
+
+      let list = projected
+      if (input.cursorID) {
+        const idx = list.findIndex((m) => m.id === input.cursorID)
+        if (idx < 0) return [] as SessionMessage.Message[]
+        // cursor is exclusive; "next" with desc means older than cursor when order=desc
+        list = input.order === "desc" ? list.slice(0, idx) : list.slice(idx + 1)
+      }
+      if (input.order === "desc") list = list.slice().reverse()
+      if (input.limit !== undefined) list = list.slice(0, input.limit)
+      return list
+    })
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
@@ -316,24 +494,42 @@ const layer = Layer.effect(
               .get()
               .pipe(Effect.orDie)
           : undefined
-        if (input.cursor && !anchor) return []
-        const boundary = anchor
-          ? order === "asc"
-            ? gt(SessionMessageTable.seq, anchor.seq)
-            : lt(SessionMessageTable.seq, anchor.seq)
-          : undefined
-        const where = boundary
-          ? and(eq(SessionMessageTable.session_id, input.sessionID), boundary)
-          : eq(SessionMessageTable.session_id, input.sessionID)
-        const query = db
-          .select()
-          .from(SessionMessageTable)
-          .where(where)
-          .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
-        const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
-          Effect.orDie,
-        )
-        return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
+        if (input.cursor && !anchor) {
+          // Cursor may be a legacy-projected id; fall through to legacy bridge.
+        } else if (anchor || !input.cursor) {
+          const boundary = anchor
+            ? order === "asc"
+              ? gt(SessionMessageTable.seq, anchor.seq)
+              : lt(SessionMessageTable.seq, anchor.seq)
+            : undefined
+          const where = boundary
+            ? and(eq(SessionMessageTable.session_id, input.sessionID), boundary)
+            : eq(SessionMessageTable.session_id, input.sessionID)
+          const query = db
+            .select()
+            .from(SessionMessageTable)
+            .where(where)
+            .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
+          const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
+            Effect.orDie,
+          )
+          const decoded = yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
+          if (decoded.length > 0) return decoded
+          // Empty V2 projection: bridge from legacy message+part store (read-only).
+          if (!input.cursor) {
+            return yield* legacyToV2({
+              sessionID: input.sessionID,
+              limit: input.limit,
+              order: requestedOrder,
+            })
+          }
+        }
+        return yield* legacyToV2({
+          sessionID: input.sessionID,
+          limit: input.limit,
+          order: requestedOrder,
+          cursorID: input.cursor?.id,
+        })
       }),
       message: Effect.fn("V2Session.message")(function* (input) {
         const stored = yield* store.message(input.messageID)

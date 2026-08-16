@@ -71,7 +71,13 @@ const layer = Layer.effect(
       if (session.revert?.snapshot) yield* snap.restore(session.revert.snapshot)
       yield* snap.revert(patches)
       if (rev.snapshot) rev.diff = yield* snap.diff(rev.snapshot)
-      const range = all.filter((msg) => msg.info.id >= rev.messageID)
+      // Position-based range: lexical id ordering breaks across the 2026-08
+      // restore (msg_f… vs msg_00… schemes). Find the target chronologically.
+      const chrono = [...all].sort(
+        (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : a.info.id > b.info.id ? 1 : 0),
+      )
+      const targetIdx = chrono.findIndex((msg) => msg.info.id === rev.messageID)
+      const range = targetIdx < 0 ? [] : chrono.slice(targetIdx)
       const diffs = yield* summary.computeDiff({ messages: range })
       yield* storage.write(["session_diff", input.sessionID], diffs).pipe(Effect.ignore)
       yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs })
@@ -102,20 +108,19 @@ const layer = Layer.effect(
       const sessionID = session.id
       const msgs = yield* sessions.messages({ sessionID }).pipe(Effect.orDie)
       const messageID = session.revert.messageID
-      const remove = [] as SessionV1.WithParts[]
-      let target: SessionV1.WithParts | undefined
-      for (const msg of msgs) {
-        if (msg.info.id < messageID) continue
-        if (msg.info.id > messageID) {
-          remove.push(msg)
-          continue
-        }
-        if (session.revert.partID) {
-          target = msg
-          continue
-        }
-        remove.push(msg)
+      // Position-based selection: lexical id comparison massacred sessions
+      // mixing pre/post-restore MessageID schemes (P0, 2026-08-15: 11k msgs gone).
+      const chrono = [...msgs].sort(
+        (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : a.info.id > b.info.id ? 1 : 0),
+      )
+      const targetIdx = chrono.findIndex((msg) => msg.info.id === messageID)
+      if (targetIdx < 0) {
+        // Target no longer exists (e.g. mixed ID schemes): delete NOTHING.
+        yield* sessions.clearRevert(sessionID)
+        return
       }
+      const remove = session.revert.partID ? chrono.slice(targetIdx + 1) : chrono.slice(targetIdx)
+      const target = chrono[targetIdx]
       for (const msg of remove) {
         yield* sessions.removeMessage({ sessionID, messageID: msg.info.id })
       }

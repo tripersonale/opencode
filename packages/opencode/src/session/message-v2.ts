@@ -582,23 +582,30 @@ export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: Ses
 
 // filterCompacted reorders messages for model consumption
 // ([compaction-user, summary, ...retained tail..., continue-user]), so array
-// position is not chronological. Derive each binding by max id (MessageID
-// is monotonic via MessageID.ascending) so a pre-compaction overflowing tail
-// assistant doesn't get mistaken for the most recent turn. tasks are
-// compaction/subtask parts attached to user messages newer than the latest
-// finished assistant — i.e. unprocessed work.
+// position is not chronological. Derive each binding by max position so a
+// pre-compaction overflowing tail assistant doesn't get mistaken for the most
+// recent turn. tasks are compaction/subtask parts attached to user messages
+// newer than the latest finished assistant — i.e. unprocessed work.
+//
+// Ordering is (time.created, id): MessageID.ascending changed prefix scheme
+// across the 2026-08 fork restore (msg_f… → msg_00…), so plain id string
+// comparison silently mis-orders sessions mixing pre/post-restore messages.
+export function msgAfter(a: { time: { created: number }; id: string }, b: { time: { created: number }; id: string }) {
+  return a.time.created > b.time.created || (a.time.created === b.time.created && a.id > b.id)
+}
+
 export function latest(msgs: WithParts[]) {
   let user: User | undefined
   let assistant: Assistant | undefined
   let finished: Assistant | undefined
   for (const msg of msgs) {
     const info = msg.info
-    if (info.role === "user" && (!user || info.id > user.id)) user = info
-    if (info.role === "assistant" && (!assistant || info.id > assistant.id)) assistant = info
-    if (info.role === "assistant" && info.finish && (!finished || info.id > finished.id)) finished = info
+    if (info.role === "user" && (!user || msgAfter(info, user))) user = info
+    if (info.role === "assistant" && (!assistant || msgAfter(info, assistant))) assistant = info
+    if (info.role === "assistant" && info.finish && (!finished || msgAfter(info, finished))) finished = info
   }
   const tasks = msgs.flatMap((m) =>
-    finished && m.info.id <= finished.id
+    finished && !msgAfter(m.info, finished)
       ? []
       : m.parts.filter((p): p is CompactionPart | SubtaskPart => p.type === "compaction" || p.type === "subtask"),
   )

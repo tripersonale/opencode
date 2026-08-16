@@ -468,16 +468,27 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     )
 
   const fetchMessages = async (sessionID: string, limit: number, before?: string, onAttempt?: () => void) => {
-    const response = await (options?.retry ?? retry)(() => {
-      onAttempt?.()
-      return client.session.messages({ sessionID, limit, before })
-    })
-    const items = (response.data ?? []).filter((item) => !!item?.info?.id)
+    // Retry with larger pages when hydrate/skip empties a small first page.
+    const attempts = [limit, Math.max(limit, 32), Math.max(limit, 128)]
+    let response: Awaited<ReturnType<typeof client.session.messages>> | undefined
+    let items: Array<{ info: Message; parts: Part[] }> = []
+    for (const pageLimit of attempts) {
+      response = await (options?.retry ?? retry)(() => {
+        onAttempt?.()
+        return client.session.messages({ sessionID, limit: pageLimit, before })
+      })
+      const raw = response.data
+      const list = Array.isArray(raw) ? raw : Array.isArray((raw as any)?.data) ? (raw as any).data : []
+      items = list.filter((item: any) => !!item?.info?.id)
+      if (items.length > 0 || pageLimit === attempts[attempts.length - 1]) break
+    }
+    if (!response) throw new Error(`Failed to load messages for session: ${sessionID}`)
+    const page = items.slice(-limit)
     return {
-      session: items.map((item) => cleanMessage(item.info)).sort((a, b) => cmp(a.id, b.id)),
-      part: items.map((item) => ({
+      session: page.map((item) => cleanMessage(item.info)).sort((a, b) => cmp(a.id, b.id)),
+      part: page.map((item) => ({
         id: item.info.id,
-        part: item.parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id)),
+        part: (item.parts ?? []).filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id)),
       })),
       cursor: response.response.headers.get("x-next-cursor") ?? undefined,
       complete: !response.response.headers.get("x-next-cursor"),
@@ -485,14 +496,28 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
   }
 
   const fetchMessage = async (sessionID: string, messageID: string, onAttempt?: () => void) => {
-    const response = await (options?.retry ?? retry)(() => {
-      onAttempt?.()
-      return client.session.message({ sessionID, messageID })
-    })
-    if (!response.data?.info?.id) throw new Error(`Message not found: ${messageID}`)
-    return {
-      message: cleanMessage(response.data.info),
-      parts: response.data.parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id)),
+    try {
+      const response = await (options?.retry ?? retry)(() => {
+        onAttempt?.()
+        return client.session.message({ sessionID, messageID })
+      })
+      if (!response.data?.info?.id) throw new Error(`Message not found: ${messageID}`)
+      return {
+        message: cleanMessage(response.data.info),
+        parts: (response.data.parts ?? []).filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id)),
+      }
+    } catch (error) {
+      // Missing parent must not wipe the whole session load.
+      console.warn("[session] parent message unavailable", sessionID, messageID, error)
+      return {
+        message: {
+          id: messageID,
+          sessionID,
+          role: "user",
+          time: { created: 0 },
+        } as Message,
+        parts: [] as Part[],
+      }
     }
   }
 
@@ -646,8 +671,20 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
           const parent = await fetchMessage(sessionID, parentID, () =>
             resetMessageLoad(sessionID, load, messageLoadBaseline(load, parentID)),
           )
-          if (parent.message.role !== "user") throw new Error(`Assistant parent is not a user message: ${parentID}`)
-          parents.push(parent)
+          if (parent.message.role !== "user") {
+            console.warn("[session] assistant parent is not user, synthesizing", parentID, parent.message.role)
+            parents.push({
+              message: {
+                id: parentID,
+                sessionID,
+                role: "user",
+                time: { created: parent.message.time?.created ?? 0 },
+              } as Message,
+              parts: [],
+            })
+          } else {
+            parents.push(parent)
+          }
         }
       }
       if (generations.get(sessionID) !== active) return

@@ -1112,7 +1112,9 @@ const layer = Layer.effect(
             lastAssistant?.finish &&
             !["tool-calls"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id
+            // "assistant newer than user" — compare by (time, id): id-only string
+            // comparison breaks on sessions mixing pre/post-restore MessageID schemes.
+            MessageV2.msgAfter(lastAssistant, lastUser)
           ) {
             const orphan = lastAssistantMsg?.parts.find(
               (part): part is SessionV1.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
