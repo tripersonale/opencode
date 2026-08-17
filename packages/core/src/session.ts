@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream, Option } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -263,8 +263,8 @@ const layer = Layer.effect(
             agents: [],
             time: { created },
           }
-          const decoded = yield* Effect.either(decodeMessage(msg))
-          if (decoded._tag === "Right") projected.push(decoded.right)
+          const decoded = yield* Effect.option(decodeMessage(msg))
+          if (Option.isSome(decoded)) projected.push(decoded.value)
           continue
         }
 
@@ -365,8 +365,8 @@ const layer = Layer.effect(
               ...(raw.time?.completed !== undefined ? { completed: Number(raw.time.completed) } : {}),
             },
           }
-          const decoded = yield* Effect.either(decodeMessage(msg))
-          if (decoded._tag === "Right") projected.push(decoded.right)
+          const decoded = yield* Effect.option(decodeMessage(msg))
+          if (Option.isSome(decoded)) projected.push(decoded.value)
         }
       }
 
@@ -530,7 +530,7 @@ const layer = Layer.effect(
           order: requestedOrder,
           cursorID: input.cursor?.id,
         })
-      }),
+      }) as Interface["messages"],
       message: Effect.fn("V2Session.message")(function* (input) {
         const stored = yield* store.message(input.messageID)
         return stored?.sessionID === input.sessionID ? stored.message : undefined
