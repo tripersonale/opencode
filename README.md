@@ -1,129 +1,69 @@
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+# OpenCode + PostgreSQL
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
+**This is a fork**, not the official OpenCode app.
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+Upstream: [anomalyco/opencode](https://github.com/anomalyco/opencode) — *the open source AI coding agent*.
 
----
+We keep a PostgreSQL backend so a shared server can hold thousands of sessions without parking them in a local SQLite file. TRiPersonale runs this fork in production.
 
-### Installation
+If you just want OpenCode on your laptop, install the official project: [opencode.ai](https://opencode.ai).
+
+## Why the fork exists
+
+OpenCode upstream is excellent as a local agent. Its default store is SQLite. That breaks down when:
+
+- several people hit the same server
+- sessions must survive host rebuilds
+- you already operate PostgreSQL and want one backup path
+
+This repository is that missing piece: same product, durable SQL.
+
+## What we add
+
+| Piece | Role |
+| --- | --- |
+| `OPENCODE_DATABASE_DIALECT=postgres` | Select the PG adapter |
+| `OPENCODE_DATABASE_URL=postgresql://…` | Connection string |
+| Drizzle adapter | Same `.get()` / `.all()` / `.run()` API as SQLite |
+| Event store | Unique `(aggregate_id, seq)` plus `SELECT … FOR UPDATE` so concurrent writers do not collide |
+
+SQLite still works. Postgres is opt-in.
+
+## Branches
+
+| Branch | Meaning |
+| --- | --- |
+| `fork-dev` | Tracks `upstream/production` + our PG work. Test here. |
+| `fork-stable` | What we deploy after trip-dev is green. |
+| `dev` / `production` | Upstream mirrors. Do not treat them as this fork. |
+
+Stable marker: tag `trip-stable-YYYY-MM-DD`.
+
+## Run with PostgreSQL
 
 ```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+git clone https://github.com/tripersonale/opencode-postgresql.git
+cd opencode-postgresql
+bun install
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+export OPENCODE_DATABASE_DIALECT=postgres
+export OPENCODE_DATABASE_URL='postgresql://user:pass@127.0.0.1:5432/opencode'
+bun run packages/opencode/src/index.ts web --port 4097
 ```
 
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
+PostgreSQL 16+ (we use 18). The app user needs rights on `session`, `message`, `part`, `event`, `event_sequence`.
 
-### Desktop App (BETA)
+## Status
 
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
+- Public fork of `anomalyco/opencode`
+- Maintained by [TRiPersonale](https://github.com/tripersonale)
+- Not affiliated with the OpenCode team
+- We merge upstream; we do not replace it
 
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+## License
 
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
+Same as upstream. See [LICENSE](./LICENSE).
 
-#### Installation Directory
+## Upstream docs
 
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
-```
-
-### Agents
-
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
-
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
-
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
-
-Learn more about [agents](https://opencode.ai/docs/agents).
-
-### Documentation
-
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
-
-### Contributing
-
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
-
-### Building on OpenCode
-
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
-
----
-
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+Agents, desktop app, and official installers live on [opencode.ai/docs](https://opencode.ai/docs).
