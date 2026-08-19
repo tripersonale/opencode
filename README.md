@@ -4,19 +4,17 @@
 
 Upstream: [anomalyco/opencode](https://github.com/anomalyco/opencode) — *the open source AI coding agent*.
 
-We keep a PostgreSQL backend so a shared server can hold thousands of sessions without parking them in a local SQLite file. TRiPersonale runs this fork in production.
+The real reason for this fork is **multi-access**: more than one client talking to the same OpenCode store at once. First came the Telegram bot. Then other surfaces (web UI, more bots, more hosts) had to share those sessions. SQLite is a single-writer file. PostgreSQL is the store that lets them coexist.
+
+TRiPersonale runs this fork in production.
 
 If you just want OpenCode on your laptop, install the official project: [opencode.ai](https://opencode.ai).
 
 ## Why the fork exists
 
-OpenCode upstream is excellent as a local agent. Its default store is SQLite. That breaks down when:
+Upstream OpenCode is a local agent with a SQLite store. That is fine for one UI on one machine. It is not fine when a Telegram bot and a browser (and later more clients) must read and write the same sessions.
 
-- several people hit the same server
-- sessions must survive host rebuilds
-- you already operate PostgreSQL and want one backup path
-
-This repository is that missing piece: same product, durable SQL.
+That is the fork: same product, one database, many accessors.
 
 ## What we add
 
