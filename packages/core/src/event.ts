@@ -3,8 +3,9 @@ export * as EventV2 from "./event"
 import { Cause, Context, Effect, Layer, Option, PubSub, Queue, Schema, Stream } from "effect"
 import { Event } from "@opencode-ai/schema/event"
 import type { Data, Definition, Payload } from "@opencode-ai/schema/event"
-import { and, asc, eq, gt, inArray } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { Database } from "./database/database"
+import * as DatabaseDialect from "./database/dialect"
 import { EventSequenceTable, EventTable } from "./event/sql"
 import { Location } from "./location"
 import { makeGlobalNode } from "./effect/app-node"
@@ -238,14 +239,28 @@ export const layerWith = (options?: LayerOptions) =>
                 Effect.gen(function* () {
                   const committed = yield* db
                     .transaction(
-                      () =>
+                      (tx) =>
                         Effect.gen(function* () {
-                          const row = yield* db
-                            .select({ seq: EventSequenceTable.seq, ownerID: EventSequenceTable.owner_id })
-                            .from(EventSequenceTable)
-                            .where(eq(EventSequenceTable.aggregate_id, aggregateID))
-                            .get()
-                            .pipe(Effect.orDie)
+                          if (DatabaseDialect.detect() === "postgres") {
+                            yield* tx
+                              .run(
+                                sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${aggregateID}, -1) ON CONFLICT (aggregate_id) DO NOTHING`,
+                              )
+                              .pipe(Effect.orDie)
+                          }
+                          const row =
+                            DatabaseDialect.detect() === "postgres"
+                              ? yield* tx
+                                  .get<{ seq: number; ownerID: string | null }>(
+                                    sql`SELECT seq, owner_id AS "ownerID" FROM event_sequence WHERE aggregate_id = ${aggregateID} FOR UPDATE`,
+                                  )
+                                  .pipe(Effect.orDie)
+                              : yield* tx
+                                  .select({ seq: EventSequenceTable.seq, ownerID: EventSequenceTable.owner_id })
+                                  .from(EventSequenceTable)
+                                  .where(eq(EventSequenceTable.aggregate_id, aggregateID))
+                                  .get()
+                                  .pipe(Effect.orDie)
                           const latest = row?.seq ?? -1
                           const encoded = Schema.encodeUnknownSync(definition.data)(event.data) as Record<
                             string,
@@ -260,7 +275,7 @@ export const layerWith = (options?: LayerOptions) =>
                             )
                           }
                           if (input && input.seq <= latest) {
-                            const stored = yield* db
+                            const stored = yield* tx
                               .select()
                               .from(EventTable)
                               .where(and(eq(EventTable.aggregate_id, aggregateID), eq(EventTable.seq, input.seq)))
@@ -272,7 +287,7 @@ export const layerWith = (options?: LayerOptions) =>
                               isDeepStrictEqual(stored.data, encoded)
                             ) {
                               if (input.ownerID && row?.ownerID == null) {
-                                yield* db
+                                yield* tx
                                   .update(EventSequenceTable)
                                   .set({ owner_id: input.ownerID })
                                   .where(eq(EventSequenceTable.aggregate_id, aggregateID))
@@ -300,7 +315,7 @@ export const layerWith = (options?: LayerOptions) =>
                               }),
                             )
                           }
-                          const stored = yield* db
+                          const stored = yield* tx
                             .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
                             .from(EventTable)
                             .where(eq(EventTable.id, event.id))
@@ -321,7 +336,7 @@ export const layerWith = (options?: LayerOptions) =>
                             yield* projector(committed)
                           }
                           if (commit) yield* commit(seq)
-                          yield* db
+                          yield* tx
                             .insert(EventSequenceTable)
                             .values([{ aggregate_id: aggregateID, seq, owner_id: input?.ownerID }])
                             .onConflictDoUpdate({
@@ -333,7 +348,7 @@ export const layerWith = (options?: LayerOptions) =>
                             })
                             .run()
                             .pipe(Effect.orDie)
-                          yield* db
+                          yield* tx
                             .insert(EventTable)
                             .values([
                               {
@@ -513,10 +528,10 @@ export const layerWith = (options?: LayerOptions) =>
 
       function remove(aggregateID: string) {
         return db
-          .transaction(() =>
+          .transaction((tx) =>
             Effect.gen(function* () {
-              yield* db.delete(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).run()
-              yield* db.delete(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).run()
+              yield* tx.delete(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).run()
+              yield* tx.delete(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).run()
             }),
           )
           .pipe(Effect.orDie)

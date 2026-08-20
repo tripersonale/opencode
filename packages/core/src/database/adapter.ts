@@ -47,6 +47,7 @@ function patchEffectQuery(qb: any): any {
     "returning",
     "onConflictDoUpdate",
     "onConflictDoNothing",
+    "for",
     "innerJoin",
     "leftJoin",
     "rightJoin",
