@@ -30,5 +30,8 @@ target
 opencode-dev
 UPCOMING_CHANGELOG.md
 logs/
+.bun-tmp/
+.pre-merge-backups/
+.opencode/acm-options-debug.json
 *.bun-build
 tsconfig.tsbuildinfo
