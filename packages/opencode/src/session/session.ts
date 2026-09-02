@@ -833,23 +833,9 @@ const layer: Layer.Layer<
           Effect.provideService(Database.Service, database),
         )).items
       }
-
-      const size = 100
-      const result = [] as SessionV1.WithParts[]
-      let before: string | undefined
-      while (true) {
-        const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: size, before }).pipe(
-          Effect.provideService(Database.Service, database),
-        )
-        if (page.items.length === 0) break
-        for (let i = page.items.length - 1; i >= 0; i--) {
-          const item = page.items[i]
-          if (item) result.push(item)
-        }
-        if (!page.more || !page.cursor) break
-        before = page.cursor
-      }
-      return result.reverse()
+      return yield* MessageV2.all({ sessionID: input.sessionID }).pipe(
+        Effect.provideService(Database.Service, database),
+      )
     })
 
     const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {

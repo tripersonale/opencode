@@ -1110,7 +1110,7 @@ const layer = Layer.effect(
 
           if (
             lastAssistant?.finish &&
-            !["tool-calls"].includes(lastAssistant.finish) &&
+            !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
             // "assistant newer than user" — compare by (time, id): id-only string
             // comparison breaks on sessions mixing pre/post-restore MessageID schemes.

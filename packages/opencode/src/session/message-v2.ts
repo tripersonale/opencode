@@ -22,7 +22,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NotFoundError } from "@/storage/storage"
 import { and } from "drizzle-orm"
-import { desc } from "drizzle-orm"
+import { asc, desc } from "drizzle-orm"
 import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
@@ -34,7 +34,7 @@ import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -77,12 +77,61 @@ export const cursor = {
   },
 }
 
-const info = (row: typeof MessageTable.$inferSelect) =>
-  ({
-    ...row.data,
-    id: row.id,
-    sessionID: row.session_id,
-  }) as Info
+function num(v: unknown, fallback = 0) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function coerceInfo(row: typeof MessageTable.$inferSelect): Info | undefined {
+  let parsed: unknown = row.data
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return undefined
+    }
+  }
+  const raw = (parsed ?? {}) as Record<string, any>
+  const i = { ...raw, id: row.id, sessionID: row.session_id }
+  if (i.role === "assistant") {
+    const path =
+      i.path && typeof i.path === "object"
+        ? { cwd: String(i.path.cwd ?? ""), root: String(i.path.root ?? "") }
+        : { cwd: String(i.path ?? ""), root: String(i.path ?? "") }
+    const cache = i.tokens?.cache ?? {}
+    return {
+      ...i,
+      role: "assistant",
+      parentID: i.parentID,
+      modelID: i.modelID ?? i.model?.modelID ?? "unknown",
+      providerID: i.providerID ?? i.model?.providerID ?? "unknown",
+      mode: String(i.mode ?? i.agent ?? "build"),
+      agent: String(i.agent ?? "build"),
+      path,
+      cost: num(i.cost),
+      tokens: {
+        input: num(i.tokens?.input),
+        output: num(i.tokens?.output),
+        reasoning: num(i.tokens?.reasoning),
+        cache: { read: num(cache.read), write: num(cache.write) },
+      },
+      time: { created: num(i.time?.created ?? row.time_created), completed: i.time?.completed },
+    } as Info
+  }
+  if (i.role === "user") {
+    return {
+      ...i,
+      role: "user",
+      agent: String(i.agent ?? "build"),
+      model: i.model ?? {
+        providerID: i.providerID ?? "unknown",
+        modelID: i.modelID ?? "unknown",
+      },
+      time: { created: num(i.time?.created ?? row.time_created) },
+    } as Info
+  }
+  return undefined
+}
 
 const part = (row: typeof PartTable.$inferSelect) =>
   ({
@@ -116,13 +165,14 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
     }
 
     return rows.flatMap((row) => {
-      const i = info(row)
-      // Skip rows whose `data` is not a valid V1 Info (e.g. legacy V2-shaped data).
-      if (Option.isNone(Schema.decodeUnknownOption(Info)(i))) return []
-      return [{
-        info: i,
-        parts: partByMessage.get(row.id) ?? [],
-      }]
+      const i = coerceInfo(row)
+      if (!i) return []
+      return [
+        {
+          info: i,
+          parts: partByMessage.get(row.id) ?? [],
+        },
+      ]
     })
   })
 }
@@ -471,26 +521,33 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   }
 })
 
+export const all = Effect.fn("MessageV2.all")(function* (input: { sessionID: SessionID }) {
+  const { db } = yield* Database.Service
+  const rows = yield* db
+    .select()
+    .from(MessageTable)
+    .where(eq(MessageTable.session_id, input.sessionID))
+    .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+    .all()
+    .pipe(Effect.orDie)
+  if (rows.length === 0) {
+    const row = yield* db
+      .select({ id: SessionTable.id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, input.sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row) return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+    return [] as WithParts[]
+  }
+  return yield* hydrate(db, rows)
+})
+
 export function stream(sessionID: SessionID) {
-  const size = 50
   return Effect.gen(function* () {
-    const result = [] as WithParts[]
-    let before: string | undefined
-    while (true) {
-      const next = yield* page({ sessionID, limit: size, before }).pipe(
-        Effect.catchIf(NotFoundError.isInstance, () =>
-          Effect.succeed({ items: [] as WithParts[], more: false, cursor: undefined }),
-        ),
-      )
-      if (next.items.length === 0) break
-      for (let i = next.items.length - 1; i >= 0; i--) {
-        const item = next.items[i]
-        if (item) result.push(item)
-      }
-      if (!next.more || !next.cursor) break
-      before = next.cursor
-    }
-    return result
+    return yield* all({ sessionID }).pipe(
+      Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed([] as WithParts[])),
+    )
   })
 }
 
@@ -517,8 +574,10 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
     .get()
     .pipe(Effect.orDie)
   if (!row) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
+  const i = coerceInfo(row)
+  if (!i) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
   return {
-    info: info(row),
+    info: i,
     parts: yield* parts(input.messageID),
   }
 })
