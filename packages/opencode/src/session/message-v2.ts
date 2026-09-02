@@ -91,8 +91,8 @@ function coerceInfo(row: typeof MessageTable.$inferSelect): Info | undefined {
       return undefined
     }
   }
-  const raw = (parsed ?? {}) as Record<string, any>
-  const i = { ...raw, id: row.id, sessionID: row.session_id }
+  const raw = (parsed ?? {}) as any
+  const i: any = { ...raw, id: row.id, sessionID: row.session_id }
   if (i.role === "assistant") {
     const path =
       i.path && typeof i.path === "object"
