@@ -12,14 +12,12 @@ export const EventTable = pgTable(
   {
     id: text().$type<EventV2.ID>().primaryKey(),
     aggregate_id: text()
-      .notNull()
-      .references(() => EventSequenceTable.aggregate_id, { onDelete: "cascade" }),
+      .notNull(),
     seq: integer().notNull(),
     type: text().notNull(),
     data: jsonb().$type<Record<string, unknown>>().notNull(),
   },
   (table) => [
-    uniqueIndex("event_aggregate_seq_idx").on(table.aggregate_id, table.seq),
     index("event_aggregate_type_seq_idx").on(table.aggregate_id, table.type, table.seq),
   ],
 )
