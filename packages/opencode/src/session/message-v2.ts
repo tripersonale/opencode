@@ -21,13 +21,14 @@ import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessag
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NotFoundError } from "@/storage/storage"
-import { and } from "drizzle-orm"
+import { and, sql } from "drizzle-orm"
 import { asc, desc } from "drizzle-orm"
 import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { detect as detectDialect } from "@opencode-ai/core/database/dialect"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
@@ -82,9 +83,107 @@ function num(v: unknown, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
-function coerceInfo(row: typeof MessageTable.$inferSelect): Info | undefined {
+const MAX_LEGACY_INFO_BYTES = 1024 * 1024
+const MAX_LEGACY_SUMMARY_BYTES = 128 * 1024
+const LEGACY_HEADER_BYTES = 8 * 1024
+const LEGACY_STUB = '{"role":"user","agent":"build"}'
+
+function oversizedData() {
+  return detectDialect() === "postgres"
+    ? sql`pg_column_size(${MessageTable.data})`
+    : sql`length(${MessageTable.data})`
+}
+
+const legacyMessageColumns = {
+  id: MessageTable.id,
+  session_id: MessageTable.session_id,
+  time_created: MessageTable.time_created,
+  data: sql<string>`case when ${oversizedData()} > ${MAX_LEGACY_INFO_BYTES} then ${LEGACY_STUB} else ${MessageTable.data} end`,
+  truncated: sql<boolean>`${oversizedData()} > ${MAX_LEGACY_INFO_BYTES}`,
+}
+
+type LegacyMessageRow = Pick<typeof MessageTable.$inferSelect, "id" | "session_id" | "time_created"> & {
+  data: unknown
+  truncated: boolean
+}
+
+function stringField(input: string, name: string) {
+  const key = `"${name}"`
+  const start = input.indexOf(key)
+  if (start === -1) return undefined
+  let index = start + key.length
+  while (/\s/.test(input[index] ?? "")) index++
+  if (input[index] !== ":") return undefined
+  index++
+  while (/\s/.test(input[index] ?? "")) index++
+  if (input[index] !== '"') return undefined
+
+  const valueStart = index
+  index++
+  while (index < input.length) {
+    if (input[index] === "\\") {
+      index += 2
+      continue
+    }
+    if (input[index] === '"') {
+      try {
+        return JSON.parse(input.slice(valueStart, index + 1)) as string
+      } catch {
+        return undefined
+      }
+    }
+    index++
+  }
+  return undefined
+}
+
+function legacyHeaderInfo(row: LegacyMessageRow, data: string): Info | undefined {
+  const header = data.slice(0, LEGACY_HEADER_BYTES)
+  const role = stringField(header, "role")
+  const agent = stringField(header, "agent") ?? "build"
+  const providerID = stringField(header, "providerID") ?? "unknown"
+  const modelID = stringField(header, "modelID") ?? "unknown"
+  const created = row.time_created
+
+  if (role === "user") {
+    return {
+      id: row.id,
+      sessionID: row.session_id,
+      role: "user",
+      time: { created },
+      agent,
+      model: { providerID, modelID },
+    } as User
+  }
+  if (role === "assistant") {
+    return {
+      id: row.id,
+      sessionID: row.session_id,
+      role: "assistant",
+      parentID: stringField(header, "parentID") ?? row.id,
+      modelID,
+      providerID,
+      mode: stringField(header, "mode") ?? agent,
+      agent,
+      path: { cwd: "", root: "" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created },
+    } as Assistant
+  }
+}
+
+function smallSummary(value: unknown): User["summary"] | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const encoded = JSON.stringify(value)
+  if (encoded.length > MAX_LEGACY_SUMMARY_BYTES) return undefined
+  return value as User["summary"]
+}
+
+export function coerceInfo(row: LegacyMessageRow): Info | undefined {
   let parsed: unknown = row.data
   if (typeof parsed === "string") {
+    if (row.truncated || parsed.length > MAX_LEGACY_INFO_BYTES) return legacyHeaderInfo(row, parsed)
     try {
       parsed = JSON.parse(parsed)
     } catch {
@@ -92,42 +191,49 @@ function coerceInfo(row: typeof MessageTable.$inferSelect): Info | undefined {
     }
   }
   const raw = (parsed ?? {}) as any
-  const i: any = { ...raw, id: row.id, sessionID: row.session_id }
-  if (i.role === "assistant") {
+  if (raw.role === "assistant") {
     const path =
-      i.path && typeof i.path === "object"
-        ? { cwd: String(i.path.cwd ?? ""), root: String(i.path.root ?? "") }
-        : { cwd: String(i.path ?? ""), root: String(i.path ?? "") }
-    const cache = i.tokens?.cache ?? {}
+      raw.path && typeof raw.path === "object"
+        ? { cwd: String(raw.path.cwd ?? ""), root: String(raw.path.root ?? "") }
+        : { cwd: String(raw.path ?? ""), root: String(raw.path ?? "") }
+    const cache = raw.tokens?.cache ?? {}
     return {
-      ...i,
+      id: row.id,
+      sessionID: row.session_id,
       role: "assistant",
-      parentID: i.parentID,
-      modelID: i.modelID ?? i.model?.modelID ?? "unknown",
-      providerID: i.providerID ?? i.model?.providerID ?? "unknown",
-      mode: String(i.mode ?? i.agent ?? "build"),
-      agent: String(i.agent ?? "build"),
+      parentID: raw.parentID ?? row.id,
+      modelID: raw.modelID ?? raw.model?.modelID ?? "unknown",
+      providerID: raw.providerID ?? raw.model?.providerID ?? "unknown",
+      mode: String(raw.mode ?? raw.agent ?? "build"),
+      agent: String(raw.agent ?? "build"),
       path,
-      cost: num(i.cost),
+      cost: num(raw.cost),
       tokens: {
-        input: num(i.tokens?.input),
-        output: num(i.tokens?.output),
-        reasoning: num(i.tokens?.reasoning),
+        input: num(raw.tokens?.input),
+        output: num(raw.tokens?.output),
+        reasoning: num(raw.tokens?.reasoning),
         cache: { read: num(cache.read), write: num(cache.write) },
       },
-      time: { created: num(i.time?.created ?? row.time_created), completed: i.time?.completed },
+      time: { created: num(raw.time?.created ?? row.time_created), completed: raw.time?.completed },
+      ...(typeof raw.summary === "boolean" ? { summary: raw.summary } : {}),
+      ...(typeof raw.finish === "string" ? { finish: raw.finish } : {}),
+      ...(typeof raw.variant === "string" ? { variant: raw.variant } : {}),
+      ...(raw.error ? { error: raw.error } : {}),
     } as Info
   }
-  if (i.role === "user") {
+  if (raw.role === "user") {
+    const summary = smallSummary(raw.summary)
     return {
-      ...i,
+      id: row.id,
+      sessionID: row.session_id,
       role: "user",
-      agent: String(i.agent ?? "build"),
-      model: i.model ?? {
-        providerID: i.providerID ?? "unknown",
-        modelID: i.modelID ?? "unknown",
+      agent: String(raw.agent ?? "build"),
+      model: raw.model ?? {
+        providerID: raw.providerID ?? "unknown",
+        modelID: raw.modelID ?? "unknown",
       },
-      time: { created: num(i.time?.created ?? row.time_created) },
+      time: { created: num(raw.time?.created ?? row.time_created) },
+      ...(summary ? { summary } : {}),
     } as Info
   }
   return undefined
@@ -144,7 +250,7 @@ const part = (row: typeof PartTable.$inferSelect) =>
 const older = (row: Cursor) =>
   or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
 
-function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
+function hydrate(db: Database.Interface["db"], rows: LegacyMessageRow[]) {
   const ids = rows.map((row) => row.id)
   const partByMessage = new Map<string, Part[]>()
   return Effect.gen(function* () {
@@ -488,7 +594,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
     : eq(MessageTable.session_id, input.sessionID)
   const rows = yield* db
-    .select()
+    .select(legacyMessageColumns)
     .from(MessageTable)
     .where(where)
     .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
@@ -524,7 +630,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
 export const all = Effect.fn("MessageV2.all")(function* (input: { sessionID: SessionID }) {
   const { db } = yield* Database.Service
   const rows = yield* db
-    .select()
+    .select(legacyMessageColumns)
     .from(MessageTable)
     .where(eq(MessageTable.session_id, input.sessionID))
     .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
@@ -583,7 +689,7 @@ export function parts(messageID: MessageID) {
 export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
   const { db } = yield* Database.Service
   const row = yield* db
-    .select()
+    .select(legacyMessageColumns)
     .from(MessageTable)
     .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
     .get()

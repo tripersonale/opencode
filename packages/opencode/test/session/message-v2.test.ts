@@ -112,6 +112,27 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test("keeps oversized legacy V1 metadata out of the session response", () => {
+    const data =
+      '{"role":"user","time":{"created":1},"agent":"build","model":{"providerID":"openai","modelID":"test"},"summary":{"diffs":[{"patch":"' +
+      "x".repeat(1024 * 1024)
+    const result = MessageV2.coerceInfo({
+      id: MessageID.make("msg_legacy"),
+      session_id: sessionID,
+      time_created: 1,
+      data,
+      truncated: true,
+    } as never)
+
+    expect(result).toMatchObject({
+      id: "msg_legacy",
+      role: "user",
+      agent: "build",
+      model: { providerID: "openai", modelID: "test" },
+    })
+    expect(result?.role === "user" ? result.summary : undefined).toBeUndefined()
+  })
+
   test("filters out messages with no parts", async () => {
     const input: SessionV1.WithParts[] = [
       {
