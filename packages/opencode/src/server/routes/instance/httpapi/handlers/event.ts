@@ -28,15 +28,14 @@ function eventResponse(events: EventV2.Interface) {
     const workspaceID = yield* InstanceState.workspaceID
     // Listener registration is eager, so events published after this point cannot
     // be lost while the HTTP body fiber is starting or emitting server.connected.
-    const queue = yield* Queue.unbounded<EventV2.Payload>()
-    const unsubscribe = yield* events.listen((event) => Effect.sync(() => Queue.offerUnsafe(queue, event)))
+    const queue = yield* Queue.dropping<EventV2.Payload>(4096)
+    const unsubscribe = yield* events.listen((event) => {
+      if (event.location?.directory !== instance.directory) return Effect.void
+      if (event.location.workspaceID !== undefined && event.location.workspaceID !== workspaceID) return Effect.void
+      return Queue.offer(queue, event).pipe(Effect.asVoid)
+    })
     yield* Effect.addFinalizer(() => unsubscribe)
     const stream = Stream.fromQueue(queue).pipe(
-      Stream.filter(
-        (event) =>
-          event.location?.directory === instance.directory &&
-          (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID),
-      ),
       Stream.map((event) => ({ id: event.id, type: event.type, properties: event.data })),
     )
     const disposed = Stream.callback<{ id: string; type: string; properties: unknown }>((queue) => {

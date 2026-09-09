@@ -32,6 +32,20 @@ const layer = Layer.effect(
         })
       })
 
+    const stripDiffs = (data: unknown) => {
+      if (!data || typeof data !== "object") return data
+      const obj = data as Record<string, unknown>
+      if ("info" in obj && typeof obj.info === "object" && obj.info !== null) {
+        const info = obj.info as Record<string, unknown>
+        if ("summary" in info && typeof info.summary === "object" && info.summary !== null) {
+          const s = info.summary as Record<string, unknown>
+          if ("diffs" in s && Array.isArray(s.diffs) && s.diffs.length > 0) {
+            return { ...obj, info: { ...info, summary: { ...s, diffs: [] } } }
+          }
+        }
+      }
+      return data
+    }
     const unsubscribe = yield* events.listen((event) =>
       Effect.gen(function* () {
         const ctx = yield* InstanceRef
@@ -40,7 +54,7 @@ const layer = Layer.effect(
           directory: event.location?.directory ?? ctx?.directory,
           project: ctx?.project.id,
           workspace: workspaceID,
-          payload: { id: event.id, type: event.type, properties: event.data },
+          payload: { id: event.id, type: event.type, properties: stripDiffs(event.data) },
         })
         if (event.durable === undefined) return
         GlobalBus.emit("event", {
